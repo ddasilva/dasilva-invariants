@@ -1,0 +1,15 @@
+name: dasilva-invariants
+channels:
+ - conda-forge
+dependencies:
+ - python=3
+ - numpy
+ - scipy
+ - astropy
+ - ipykernel
+ - vtk
+ - matplotlib
+ - pip
+ - pip:
+   - pyhdf
+   - pyvista
