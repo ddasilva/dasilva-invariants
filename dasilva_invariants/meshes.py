@@ -7,7 +7,6 @@ this project.
 In this module, all grids returned are in units of Re and all magnetic
 fields are in units of Gauss.
 """
-
 from astropy import constants, units
 import numpy as np
 from pyhdf.SD import SD, SDC
@@ -54,8 +53,9 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     Args
       lfm_hdf4_path: Path to LFM hdf4 file
     Returns
-      mesh: pyvista.StrucutredGrid instance, mesh on LFM4 grid with dipolate
-      field values.
+      mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with dipole
+        field values. Grid is in units of Re and magnetic field is is units o
+        Gauss.
     """
     # Read LFM grid from HDF file and attach units of cm
     # ------------------------------------------------------------------------
@@ -76,11 +76,21 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     # ------------------------------------------------------------------------
     # Dipole model, per Kivelson and Russel equations
     # 6.3(a)-(c), page 165.
-    Mz = -8e15 * units.T * units.m**3 
     r = np.sqrt(X_grid**2 + Y_grid**2 + Z_grid**2)
-    Bx = 3 * X_grid * Z_grid * Mz / r**5
-    By = 3 * Y_grid * Z_grid * Mz / r**5
-    Bz = (3 * Z_grid**2 - r**2) * Mz / r**5
+    r = r.to(constants.R_earth).value
+    
+    x = X_grid.to(constants.R_earth).value
+    y = Y_grid.to(constants.R_earth).value
+    z = Z_grid.to(constants.R_earth).value
+    
+    B0 = 30e3 
+    Bx = 3 * x * z * B0 / r**5
+    By = 3 * y * z * B0 / r**5
+    Bz = (3 * z**2 - r**2) * B0 / r**5
+
+    Bx *= units.nT
+    By *= units.nT
+    Bz *= units.nT
 
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------

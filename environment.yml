@@ -13,3 +13,4 @@ dependencies:
  - pip:
    - pyhdf
    - pyvista
+   - ai.cs
