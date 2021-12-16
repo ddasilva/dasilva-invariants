@@ -46,7 +46,7 @@ def _convert_to_pyvista_order(data):
     return data
 
 
-def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
+def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path, xstretch=1, ystretch=1, zstretch=1):
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -79,9 +79,9 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     r = np.sqrt(X_grid**2 + Y_grid**2 + Z_grid**2)
     r = r.to(constants.R_earth).value
     
-    x = X_grid.to(constants.R_earth).value
-    y = Y_grid.to(constants.R_earth).value
-    z = Z_grid.to(constants.R_earth).value
+    x = X_grid.to(constants.R_earth).value * xstretch
+    y = Y_grid.to(constants.R_earth).value * ystretch
+    z = Z_grid.to(constants.R_earth).value * zstretch
     
     B0 = 30e3 
     Bx = 3 * x * z * B0 / r**5
