@@ -24,6 +24,7 @@ class CalculateKResult:
     starting_point: Tuple[float, float, float]
     
     trace_points: np.array             # trace points
+    trace_latitude: np.array           # trace latitude
     trace_field_strength: np.array     # field strenth along trace
     integral_axis: np.array            # axis of K integration
     integral_axis_latitude: np.array   # latitude corresponding to integ axis
@@ -71,8 +72,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None):
         max_step_length=0.0001,
         min_step_length=0.0001,
         initial_step_length=0.0001,
-        step_unit='l',
-        interpolator_type='c',
+        step_unit='cl',
 
     )
     trace_field_strength = np.linalg.norm(trace['B'], axis=1)
@@ -91,6 +91,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None):
         
     # Sort field line trace points
     # ------------------------------------------------------------------------
+    trace_latitude_sorted = trace_latitude[trace_sorter]
     trace_points_sorted = trace.points[trace_sorter]
     trace_field_strength_sorted = trace_field_strength[trace_sorter]    
     
@@ -101,7 +102,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None):
     ds_vec = np.diff(trace_points_sorted[Bm_mask], axis=0)
     ds_scalar = np.linalg.norm(ds_vec, axis=1)
 
-    integral_axis_latitude = np.rad2deg(trace_latitude[trace_sorter][Bm_mask])
+    integral_axis_latitude = np.rad2deg(trace_latitude_sorted[Bm_mask])
     integral_axis = np.array([0] + np.cumsum(ds_scalar).tolist())
     integral_integrand = (Bm - trace_field_strength_sorted[Bm_mask])**(0.5)
 
@@ -116,6 +117,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None):
         starting_point=starting_point,
         
         trace_points=trace_points_sorted,
+        trace_latitude=trace_latitude_sorted,
         trace_field_strength=trace_field_strength_sorted,
         integral_axis=integral_axis,
         integral_axis_latitude=integral_axis_latitude,
