@@ -40,7 +40,7 @@ class CalculateLStarResult:
     drift_K: np.array                  # drift shell K values 
 
     
-def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None):
+def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=None):
     """Calculate the K adiabatic invariant.
 
     Either mirror_latitude or Bm must be specified.
@@ -65,13 +65,22 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None):
 
     # Calculate field line trace
     # ------------------------------------------------------------------------
+    if step_size is None:
+        max_step_length = 0.2
+        min_step_length = 0.2
+        initial_step_length = 0.2
+    else:
+        max_step_length = step_size
+        min_step_length = step_size
+        initial_step_length = step_size
+
     trace = mesh.streamlines(
         'B',
         start_position=starting_point,
         terminal_speed=0.0,
-        max_step_length=0.0001,
-        min_step_length=0.0001,
-        initial_step_length=0.0001,
+        max_step_length=max_step_length,
+        min_step_length=min_step_length,
+        initial_step_length=initial_step_length,
         step_unit='cl',
 
     )
@@ -126,8 +135,8 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None):
 
 
 def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
-                    num_local_times=4, rel_error_threshold=0.01,
-                    max_iters=100, verbose=False):
+                    num_local_times=4, rel_error_threshold=0.03,
+                    max_iters=100, trace_step_size=None, verbose=False):
     """Calculate the L* adiabatic invariant.
    
     Args
@@ -160,7 +169,8 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         x=starting_point[0], y=starting_point[1], z=0
     )
     starting_result = calculate_K(
-        mesh, starting_point, mirror_latitude=starting_mirror_latitude
+        mesh, starting_point, mirror_latitude=starting_mirror_latitude,
+        step_size=trace_step_size,
     )
     
     # Estimate L-shell value of equivalent K at other local times using
@@ -182,7 +192,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         drift_lvalues[i], drift_K[i] = _bisect_lvalue_by_K(
             mesh, starting_result.K, starting_result.Bm,
             starting_lvalue, local_time, starting_theta,
-            max_iters, rel_error_threshold
+            max_iters, rel_error_threshold, trace_step_size,
         )
 
     # Return results
@@ -195,7 +205,8 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     
 
 def _bisect_lvalue_by_K(mesh, target_K, Bm, starting_lvalue, local_time,
-                        starting_theta, max_iters, rel_error_threshold):
+                        starting_theta, max_iters, rel_error_threshold,
+                        step_size):
     """Internal helper function to calculate_LStar(). Applies bisection method
     to find an L-value (L-shell number) with an equal K.
 
@@ -229,7 +240,8 @@ def _bisect_lvalue_by_K(mesh, target_K, Bm, starting_lvalue, local_time,
         current_starting_point = cs.sp2cart(
             r=current_lvalue, phi=local_time, theta=starting_theta
         )
-        current_result = calculate_K(mesh, current_starting_point, Bm=Bm)
+        current_result = calculate_K(mesh, current_starting_point, Bm=Bm,
+                                     step_size=step_size)
         rel_error = (
             abs(target_K - current_result.K) /
             target_K
