@@ -36,7 +36,7 @@ class CalculateLStarResult:
     """Class to hold the return value of calculate_LStar()
     """
     drift_local_times: np.array        # magnetic local times of drift shell
-    drift_lvalues: np.array            # l-shell value of drift shell 
+    drift_rvalues: np.array            # l-shell value of drift shell 
     drift_K: np.array                  # drift shell K values 
 
     
@@ -66,9 +66,9 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=N
     # Calculate field line trace
     # ------------------------------------------------------------------------
     if step_size is None:
-        max_step_length = 0.2
-        min_step_length = 0.2
-        initial_step_length = 0.2
+        max_step_length = 1e-2
+        min_step_length = 1e-2
+        initial_step_length = 1e-2
     else:
         max_step_length = step_size
         min_step_length = step_size
@@ -81,8 +81,8 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=N
         max_step_length=max_step_length,
         min_step_length=min_step_length,
         initial_step_length=initial_step_length,
-        step_unit='cl',
-
+        step_unit='l',
+        max_steps=1_000_000,   
     )
     trace_field_strength = np.linalg.norm(trace['B'], axis=1)
 
@@ -165,7 +165,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     if verbose:
         print(f'Calculating drift l-shell 1/{drift_local_times.size}')
 
-    starting_lvalue, _, _ = cs.cart2sp(
+    starting_rvalue, _, _ = cs.cart2sp(
         x=starting_point[0], y=starting_point[1], z=0
     )
     starting_result = calculate_K(
@@ -174,24 +174,24 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     )
     
     # Estimate L-shell value of equivalent K at other local times using
-    # bisection method. The first element in the drift_lvalues array is 
+    # bisection method. The first element in the drift_rvalues array is 
     # not in the loop because it is not done with bisection.
     # ------------------------------------------------------------------------
-    drift_lvalues = np.zeros_like(drift_local_times)
+    drift_rvalues = np.zeros_like(drift_local_times)
     drift_K = np.zeros_like(drift_local_times)
     
-    drift_lvalues[0] = starting_lvalue
+    drift_rvalues[0] = starting_rvalue
     drift_K[0] = starting_result.K
     
     for i, local_time in enumerate(drift_local_times):
         if i == 0:
             continue
         if verbose:
-            print(f'Calculating drift l-shell {i+1}/{drift_lvalues.size}')
+            print(f'Calculating drift l-shell {i+1}/{drift_rvalues.size}')
 
-        drift_lvalues[i], drift_K[i] = _bisect_lvalue_by_K(
+        drift_rvalues[i], drift_K[i] = _bisect_rvalue_by_K(
             mesh, starting_result.K, starting_result.Bm,
-            starting_lvalue, local_time, starting_theta,
+            starting_rvalue, local_time, starting_theta,
             max_iters, rel_error_threshold, trace_step_size,
         )
 
@@ -199,12 +199,12 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     # ------------------------------------------------------------------------    
     return CalculateLStarResult(
         drift_local_times=drift_local_times,
-        drift_lvalues=drift_lvalues,
+        drift_rvalues=drift_rvalues,
         drift_K=drift_K
     )
     
 
-def _bisect_lvalue_by_K(mesh, target_K, Bm, starting_lvalue, local_time,
+def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
                         starting_theta, max_iters, rel_error_threshold,
                         step_size):
     """Internal helper function to calculate_LStar(). Applies bisection method
@@ -214,14 +214,14 @@ def _bisect_lvalue_by_K(mesh, target_K, Bm, starting_lvalue, local_time,
       mesh: grid and magnetic field, loaded using meshes module
       target_K: floating point K value to search for (float)
       Bm: magnetic mirroring point; parameter used to estimte K (float)
-      starting_lvalue: starting point lvalue (float)
+      starting_rvalue: starting point rvalue (float)
       local_time: starting local time (radians, float)
       starting_theta: starting latitude (radians, float)
       max_iters: Maximum number of iterations before erroring out (int)
       rel_error_threshold: Relative error threshold to consider two K's equal 
         (float between [0, 1]).
     Returns
-      lvalue: lshell number at given local time which produces the same K on the
+      rvalue: lshell number at given local time which produces the same K on the
         given mesh (float)
     Raises
       RuntimeError: maximum number of iterations reached
@@ -229,16 +229,16 @@ def _bisect_lvalue_by_K(mesh, target_K, Bm, starting_lvalue, local_time,
     # Perform bisection method. If you are not sure what this is, it is
     # advised you read about bisection on wikipedia first.
     # ------------------------------------------------------------------------
-    upper_lvalue = starting_lvalue * 2
-    lower_lvalue = np.linalg.norm(mesh.points, axis=1).min()
-    current_lvalue = starting_lvalue
+    upper_rvalue = starting_rvalue * 2
+    lower_rvalue = np.linalg.norm(mesh.points, axis=1).min()
+    current_rvalue = starting_rvalue
     rel_errors = []
     
     for _ in range(max_iters):
-        #print(lower_lvalue, upper_lvalue, current_lvalue)
+        #print(lower_rvalue, upper_rvalue, current_rvalue)
         
         current_starting_point = cs.sp2cart(
-            r=current_lvalue, phi=local_time, theta=starting_theta
+            r=current_rvalue, phi=local_time, theta=starting_theta
         )
         current_result = calculate_K(mesh, current_starting_point, Bm=Bm,
                                      step_size=step_size)
@@ -249,20 +249,20 @@ def _bisect_lvalue_by_K(mesh, target_K, Bm, starting_lvalue, local_time,
         
         if rel_error < rel_error_threshold:
             # match found!
-            return current_lvalue, current_result.K
+            return current_rvalue, current_result.K
         elif current_result.K < target_K:
             # too low!
-            rel_errors.append((rel_error, 'too_low', current_lvalue))
+            rel_errors.append((rel_error, 'too_low', current_rvalue))
                                
-            current_lvalue, lower_lvalue = \
-                ((upper_lvalue + current_lvalue) / 2, current_lvalue)
+            current_rvalue, lower_rvalue = \
+                ((upper_rvalue + current_rvalue) / 2, current_rvalue)
             #print('Too Low!')
         else:
             # too high!
-            rel_errors.append((rel_error, 'too_high', current_lvalue))
+            rel_errors.append((rel_error, 'too_high', current_rvalue))
 
-            current_lvalue, upper_lvalue = \
-                ((lower_lvalue + current_lvalue) / 2, current_lvalue)
+            current_rvalue, upper_rvalue = \
+                ((lower_rvalue + current_rvalue) / 2, current_rvalue)
             #print('Too high!')
             
         
