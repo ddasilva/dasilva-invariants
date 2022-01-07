@@ -15,3 +15,5 @@ dependencies:
    - pyvista
    - ai.cs
    - geopack
+   - joblib
+   - progressbar2
