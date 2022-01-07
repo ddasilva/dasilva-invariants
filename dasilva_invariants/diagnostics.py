@@ -152,7 +152,7 @@ def dayside_field_intensities(mesh, model_title, th=0, r_min=3, r_max=7):
     
     for i, r in enumerate(rs):
         x, y = np.cos(np.deg2rad(th)) * r, np.sin(np.deg2rad(th)) * r
-        result = invariants.calculate_K(mesh, (r, 0, 0), 7.5, step_size=None)
+        result = invariants.calculate_K(mesh, (x, y, 0), 7.5, step_size=None)
         rel_position = np.arange(result.trace_latitude.size) /  result.trace_latitude.size
         
         plt.plot(rel_position, result.trace_field_strength, ',-',
@@ -203,3 +203,28 @@ def equitorial_plot_of_intensity(mesh, model_title):
     plt.ylim(-40, 40)
     
 
+def K_integrand_plot(mesh, model_title, r=7, th=180):
+    """Plot K integrand versus integration axis.
+
+    Args
+      mesh: grid and magnetic field, loaded using meshes module
+      model_title: Title of magnetic field model, used in title of plot
+    """
+    mirror_deg = 7.5
+    x, y = np.cos(np.deg2rad(th)) * r, np.sin(np.deg2rad(th)) * r
+    result = invariants.calculate_K(mesh, (x, y, 0), mirror_deg)
+
+    plt.figure(figsize=(8, 4))
+
+    plt.plot(result.integral_axis_latitude, result.integral_integrand, 'k.-')
+    plt.fill_between(result.integral_axis_latitude,
+                     result.integral_integrand.min(),
+                     result.integral_integrand)
+    plt.title(f'{model_title}\n'
+              f'K = {result.K:.6f} Re Sqrt(G) = '
+              '$\int_{s_m}^{s_m\'}\sqrt{B_m - B(s)}ds$\n'
+              f'Bm = {result.Bm:.6f} G\n'
+              f'Mirror at {mirror_deg:.1f} deg',
+              fontsize=20)
+    plt.xlabel('Latitude (deg)', fontsize=20)
+    plt.ylabel('$\sqrt{B_m - B(s)}$', fontsize=20)
