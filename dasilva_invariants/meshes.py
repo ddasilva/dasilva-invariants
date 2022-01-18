@@ -12,7 +12,6 @@ from datetime import datetime
 from geopack import geopack, t96
 from joblib import Parallel, delayed
 import numpy as np
-from progressbar import ProgressBar
 from pyhdf.SD import SD, SDC
 import pyvista
 
@@ -35,7 +34,7 @@ def _fix_lfm_hdf4_array_order(data):
       data: array with (i, j, k) fixed
     """
     s = data.shape
-    data = np.reshape(data.ravel(), (s[2], s[1], s[0]), order='F' )
+    data = np.reshape(data.ravel(), (s[2], s[1], s[0]), order='F')
     return data
 
 
@@ -53,7 +52,7 @@ def _convert_to_pyvista_order(data):
     return data
 
 
-def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path, xstretch=1, ystretch=1, zstretch=1):
+def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -64,35 +63,44 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path, xstretch=1, ystretch=1, zstretch=
         field values. Grid is in units of Re and magnetic field is is units o
         Gauss.
     """
-    # Read LFM grid from HDF file and attach units of cm
+    # Read LFM grid from HDF file and convert to units of km
     # ------------------------------------------------------------------------
     hdf = SD(lfm_hdf4_path, SDC.READ)
     X_grid = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
     Y_grid = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
     Z_grid = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
-
     X_grid *= units.cm
     Y_grid *= units.cm
     Z_grid *= units.cm
 
-    X_grid = X_grid.to(units.km)   # prevent overflow
-    Y_grid = Y_grid.to(units.km)
-    Z_grid = Z_grid.to(units.km)
-    
-    # Calculate dipole model
+    X_grid_km = X_grid.to(units.km).value
+    Y_grid_km = Y_grid.to(units.km).value
+    Z_grid_km = Z_grid.to(units.km).value
+
+    # Compute cell centers
+    # ------------------------------------------------------------------------
+    cell_centers = (
+        pyvista.StructuredGrid(X_grid_km, Y_grid_km, Z_grid_km)
+        .cell_centers()
+    )
+    x_km = cell_centers.points[:, 0] * units.km
+    y_km = cell_centers.points[:, 1] * units.km
+    z_km = cell_centers.points[:, 2] * units.km
+
+    # Calculate dipole model 
     # ------------------------------------------------------------------------
     # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
-    r = np.sqrt(X_grid**2 + Y_grid**2 + Z_grid**2)
-    r = r.to(constants.R_earth).value
+    r_re = np.sqrt(x_km**2 + y_km**2 + z_km**2)
+    r_re = r_re.to(constants.R_earth).value
     
-    x = X_grid.to(constants.R_earth).value * xstretch
-    y = Y_grid.to(constants.R_earth).value * ystretch
-    z = Z_grid.to(constants.R_earth).value * zstretch
+    x_re = x_km.to(constants.R_earth).value 
+    y_re = y_km.to(constants.R_earth).value 
+    z_re = z_km.to(constants.R_earth).value 
     
     B0 = 30e3 
-    Bx = 3 * x * z * B0 / r**5
-    By = 3 * y * z * B0 / r**5
-    Bz = (3 * z**2 - r**2) * B0 / r**5
+    Bx = 3 * x_re * z_re * B0 / r_re**5
+    By = 3 * y_re * z_re * B0 / r_re**5
+    Bz = (3 * z_re**2 - r_re**2) * B0 / r_re**5
 
     Bx *= units.nT
     By *= units.nT
@@ -100,18 +108,20 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path, xstretch=1, ystretch=1, zstretch=
 
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------
-    X_grid_in_re = (X_grid / constants.R_earth).to(1).value
-    Y_grid_in_re = (Y_grid / constants.R_earth).to(1).value
-    Z_grid_in_re = (Z_grid / constants.R_earth).to(1).value
+    X_grid_re = X_grid.to(constants.R_earth).value
+    Y_grid_re = Y_grid.to(constants.R_earth).value
+    Z_grid_re = Z_grid.to(constants.R_earth).value
 
-    mesh = pyvista.StructuredGrid(X_grid_in_re, Y_grid_in_re, Z_grid_in_re)
-    
-    B = np.empty((mesh.n_points, 3))
-    B[:, 0] = _convert_to_pyvista_order(Bx.to(units.G).value)
-    B[:, 1] = _convert_to_pyvista_order(By.to(units.G).value)
-    B[:, 2] = _convert_to_pyvista_order(Bz.to(units.G).value)
+    mesh = pyvista.StructuredGrid(X_grid_re, Y_grid_re, Z_grid_re)
+
+    B = np.empty((mesh.n_cells, 3))
+    B[:, 0] = Bx.to(units.G).value
+    B[:, 1] = By.to(units.G).value
+    B[:, 2] = Bz.to(units.G).value
     mesh['B'] = B
 
+    mesh = mesh.cell_data_to_point_data()
+    
     # Return output
     return mesh
 
@@ -169,7 +179,7 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     B[:, 1] = _convert_to_pyvista_order(By.to(units.G).value)
     B[:, 2] = _convert_to_pyvista_order(Bz.to(units.G).value)
     mesh['B'] = B    
-    
+
     mesh = mesh.cell_data_to_point_data()
     
     # Return output
@@ -190,86 +200,99 @@ l
         field values. Grid is in units of Re and magnetic field is is units of
         Gauss.
     """
-    # Read LFM grid from HDF file and convert to units of Re in SM coordinates
+    # Read LFM grid from HDF file and convert to units of km and re
     # ------------------------------------------------------------------------
     hdf = SD(lfm_hdf4_path, SDC.READ)
-    X_grid = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
-    Y_grid = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
-    Z_grid = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
+    X_hdf_grid = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
+    Y_hdf_grid = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
+    Z_hdf_grid = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
+    X_hdf_grid *= units.cm
+    Y_hdf_grid *= units.cm
+    Z_hdf_grid *= units.cm
 
-    X_grid *= units.cm
-    Y_grid *= units.cm
-    Z_grid *= units.cm
+    X_km_sm_grid = X_hdf_grid.to(units.km).value
+    Y_km_sm_grid = Y_hdf_grid.to(units.km).value
+    Z_km_sm_grid = Z_hdf_grid.to(units.km).value
 
-    X_grid = X_grid.to(units.km)   # prevent overflow
-    Y_grid = Y_grid.to(units.km)
-    Z_grid = Z_grid.to(units.km)
-
-    X_sm = (X_grid / constants.R_earth).to(1).value
-    Y_sm = (Y_grid / constants.R_earth).to(1).value
-    Z_sm = (Z_grid / constants.R_earth).to(1).value
+    X_re_sm_grid = X_hdf_grid.to(constants.R_earth).value
+    Y_re_sm_grid = Y_hdf_grid.to(constants.R_earth).value
+    Z_re_sm_grid = Z_hdf_grid.to(constants.R_earth).value
     
+    # Compute cell centers to evaluate T96 at
+    # ------------------------------------------------------------------------
+    cell_centers = (
+        pyvista.StructuredGrid(X_km_sm_grid, Y_km_sm_grid, Z_km_sm_grid)
+        .cell_centers()
+    )
+    x_km_sm = cell_centers.points[:, 0] * units.km
+    y_km_sm = cell_centers.points[:, 1] * units.km
+    z_km_sm = cell_centers.points[:, 2] * units.km
+    num_cells = cell_centers.points.shape[0]
+    
+    x_re_sm = x_km_sm.to(constants.R_earth).value
+    y_re_sm = y_km_sm.to(constants.R_earth).value
+    z_re_sm = z_km_sm.to(constants.R_earth).value
+
     # Calibrate geopack using the specified time and convert grid to GSM using
-    # dipole tilt/
+    # dipole tilt
     # ------------------------------------------------------------------------
     epoch = datetime(1970, 1, 1)
     seconds = (time - epoch).total_seconds()
     dipole_tilt = geopack.recalc(seconds)
 
-    X_gsm, Y_gsm, Z_gsm = sm_to_gsm(X_sm, Y_sm, Z_sm, dipole_tilt)
+    x_re_gsm, y_re_gsm, z_re_gsm = sm_to_gsm(x_re_sm, y_re_sm, z_re_sm,
+                                             dipole_tilt)
     
     # Calculate the internal (dipole) and external (t96) fields using the
     # geopack module
     # ------------------------------------------------------------------------    
     # Use joblib to process in parallel using the number of processes and
     # verbosity settings specified by caller
-    lfm_shape = X_sm.shape
     params = (dynamic_pressure, Dst, By_imf, Bz_imf, 0, 0, 0, 0, 0, 0)
     tasks = []
-    
-    for i in range(lfm_shape[0]):
-        for j in range(lfm_shape[1]):
-            for k in range(lfm_shape[2]):
-               task = delayed(_t96_parallel_helper)(
-                   i, j, k, params,
-                   X_gsm[i, j, k], Y_gsm[i, j, k], Z_gsm[i, j, k],
-                   dipole_tilt
-               )
-               tasks.append(task)
+
+    for i in range(num_cells):    
+        task = delayed(_t96_parallel_helper)(
+            i, params, x_re_gsm[i], y_re_gsm[i], z_re_gsm[i], dipole_tilt
+        )
+        tasks.append(task)
             
     results = Parallel(verbose=verbose, n_jobs=n_jobs,
                        backend='multiprocessing')(tasks)
 
     # Repopulate parallel results into single array and convert to SM
     # coordinates
-    B_shape = (3,) + lfm_shape
+    B_shape = (3, num_cells)
     B_internal = np.zeros(B_shape)          # GSM Coordinates
     B_external = np.zeros(B_shape)          # GSM Coordinates
 
-    for (i, j, k), internal_field_vec, external_field_vec in results:
-        B_internal[:, i, j, k] = internal_field_vec
-        B_external[:, i, j, k] = external_field_vec
+    for i, internal_field_vec, external_field_vec in results:
+        B_internal[:, i] = internal_field_vec
+        B_external[:, i] = external_field_vec
 
     B_t96 = gsm_to_sm(*(B_internal + B_external), dipole_tilt)
     B_t96 *= units.nT
 
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------
-    mesh = pyvista.StructuredGrid(X_sm, Y_sm, Z_sm)
+    mesh = pyvista.StructuredGrid(X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid)
     
-    B = np.empty((mesh.n_points, 3))
-    B[:, 0] = _convert_to_pyvista_order(B_t96[0, :].to(units.G).value)
-    B[:, 1] = _convert_to_pyvista_order(B_t96[1, :].to(units.G).value)
-    B[:, 2] = _convert_to_pyvista_order(B_t96[2, :].to(units.G).value)
+    B = np.empty((mesh.n_cells, 3))
+    B[:, 0] = B_t96[0, :].to(units.G).value
+    B[:, 1] = B_t96[1, :].to(units.G).value
+    B[:, 2] = B_t96[2, :].to(units.G).value
     mesh['B'] = B
 
+    mesh = mesh.cell_data_to_point_data()
+    
     # Return output
     return mesh
 
 
 
-def _t96_parallel_helper(i, j, k, params, x_gsm, y_gsm, z_gsm, dipole_tilt):
-    internal_field_vec = geopack.dip(x_gsm, y_gsm, z_gsm)
-    external_field_vec = t96.t96(params, dipole_tilt, x_gsm, y_gsm, z_gsm)
+def _t96_parallel_helper(i, params, x_re_gsm, y_re_gsm, z_re_gsm, dipole_tilt):
+    internal_field_vec = geopack.dip(x_re_gsm, y_re_gsm, z_re_gsm)
+    external_field_vec = t96.t96(params, dipole_tilt,
+                                 x_re_gsm, y_re_gsm, z_re_gsm)
 
-    return (i, j, k), internal_field_vec, external_field_vec
+    return i, internal_field_vec, external_field_vec
