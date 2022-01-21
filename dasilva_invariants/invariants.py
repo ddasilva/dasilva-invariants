@@ -36,7 +36,7 @@ class CalculateLStarResult:
     """Class to hold the return value of calculate_LStar()
     """
     drift_local_times: np.array        # magnetic local times of drift shell
-    drift_rvalues: np.array            # l-shell value of drift shell 
+    drift_rvalues: np.array            # radius drift shell at local time
     drift_K: np.array                  # drift shell K values 
 
     
@@ -170,7 +170,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     # Calculate K at the current local time.
     # ------------------------------------------------------------------------
     if verbose:
-        print(f'Calculating drift l-shell 1/{drift_local_times.size}')
+        print(f'Calculating drift radius 1/{drift_local_times.size}')
 
     starting_rvalue, _, _ = cs.cart2sp(
         x=starting_point[0], y=starting_point[1], z=0
@@ -180,9 +180,9 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         step_size=trace_step_size,
     )
     
-    # Estimate L-shell value of equivalent K at other local times using
-    # bisection method. The first element in the drift_rvalues array is 
-    # not in the loop because it is not done with bisection.
+    # Estimate radius of equivalent K at other local times using bisection
+    # method. The first element in the drift_rvalues array is not in the
+    # loop because it is not done with bisection.
     # ------------------------------------------------------------------------
     drift_rvalues = np.zeros_like(drift_local_times)
     drift_K = np.zeros_like(drift_local_times)
@@ -194,7 +194,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         if i == 0:
             continue
         if verbose:
-            print(f'Calculating drift l-shell {i+1}/{drift_rvalues.size}')
+            print(f'Calculating drift radius {i+1}/{drift_rvalues.size}')
 
         drift_rvalues[i], drift_K[i] = _bisect_rvalue_by_K(
             mesh, starting_result.K, starting_result.Bm,
@@ -215,7 +215,7 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
                         starting_theta, max_iters, rel_error_threshold,
                         step_size):
     """Internal helper function to calculate_LStar(). Applies bisection method
-    to find an L-value (L-shell number) with an equal K.
+    to find an radius with an equal K.
 
     Args
       mesh: grid and magnetic field, loaded using meshes module
