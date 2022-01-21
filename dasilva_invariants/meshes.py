@@ -18,7 +18,6 @@ import pyvista
 from .utils import sm_to_gsm, gsm_to_sm
 
 
-
 def _fix_lfm_hdf4_array_order(data):
     """Apply fix to LFM data to account for strange format in HDF4 file.
 
@@ -38,20 +37,6 @@ def _fix_lfm_hdf4_array_order(data):
     return data
 
 
-def _convert_to_pyvista_order(data):
-    """This function converts an array used in a PyVista mesh from its 3D
-    form to its a 1D form required to be stored in the mesh.
-
-    Args
-      data: array with three dimensions
-    Returns
-      data: 1D flattened array suitable to be added to a PyVista mesh
-    """
-    s = data.shape
-    data = np.reshape(data.ravel(), (s[2], s[1], s[0]), order='F').flatten()
-    return data
-
-
 def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
@@ -63,40 +48,19 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
         field values. Grid is in units of Re and magnetic field is is units o
         Gauss.
     """
-    # Read LFM grid from HDF file and convert to units of km
+    # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
-    hdf = SD(lfm_hdf4_path, SDC.READ)
-    X_grid = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
-    Y_grid = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
-    Z_grid = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
-    X_grid *= units.cm
-    Y_grid *= units.cm
-    Z_grid *= units.cm
+    X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
 
-    X_grid_km = X_grid.to(units.km).value
-    Y_grid_km = Y_grid.to(units.km).value
-    Z_grid_km = Z_grid.to(units.km).value
-
-    # Compute cell centers
-    # ------------------------------------------------------------------------
-    cell_centers = (
-        pyvista.StructuredGrid(X_grid_km, Y_grid_km, Z_grid_km)
-        .cell_centers()
-    )
-    x_km = cell_centers.points[:, 0] * units.km
-    y_km = cell_centers.points[:, 1] * units.km
-    z_km = cell_centers.points[:, 2] * units.km
+    x_re = X_grid.flatten(order='F') # flat arrays, easier later
+    y_re = Y_grid.flatten(order='F')
+    z_re = Z_grid.flatten(order='F')
 
     # Calculate dipole model 
     # ------------------------------------------------------------------------
     # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
-    r_re = np.sqrt(x_km**2 + y_km**2 + z_km**2)
-    r_re = r_re.to(constants.R_earth).value
-    
-    x_re = x_km.to(constants.R_earth).value 
-    y_re = y_km.to(constants.R_earth).value 
-    z_re = z_km.to(constants.R_earth).value 
-    
+    r_re = np.sqrt(x_re**2 + y_re**2 + z_re**2)
+        
     B0 = 30e3 
     Bx = 3 * x_re * z_re * B0 / r_re**5
     By = 3 * y_re * z_re * B0 / r_re**5
@@ -108,90 +72,217 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
 
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------
-    X_grid_re = X_grid.to(constants.R_earth).value
-    Y_grid_re = Y_grid.to(constants.R_earth).value
-    Z_grid_re = Z_grid.to(constants.R_earth).value
+    mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
 
-    mesh = pyvista.StructuredGrid(X_grid_re, Y_grid_re, Z_grid_re)
-
-    B = np.empty((mesh.n_cells, 3))
+    B = np.empty((mesh.n_points, 3))
     B[:, 0] = Bx.to(units.G).value
     B[:, 1] = By.to(units.G).value
     B[:, 2] = Bz.to(units.G).value
-    mesh['B'] = B
+    mesh.point_data['B'] = B
 
-    mesh = mesh.cell_data_to_point_data()
-    
     # Return output
     return mesh
 
 
+def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
+    """Loads LFM grid centers with singularity patched. 
+
+    This code is adapted from Josh Murphy's GhostPy and converted to python
+    (crudely).
+    
+    Args
+      lfm_hdf4_path: Path to LFM HDF4 file
+    Returns
+      X_grid, Y_grid, Z_grid: arrays of LFM grid cell centers in units of Re
+        with the x-axis singularity issue fixed.
+    """
+    # Read LFM grid from HDF file 
+    # ------------------------------------------------------------------------
+    hdf = SD(lfm_hdf4_path, SDC.READ)
+    X_grid_raw = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
+    Y_grid_raw = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
+    Z_grid_raw = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
+    
+    # This code implements Josh Murphy's point2CellCenteredGrid() function
+    # ------------------------------------------------------------------------
+    ni   = X_grid_raw.shape[0] - 1
+    nip1 = X_grid_raw.shape[0]
+    nip2 = X_grid_raw.shape[0] + 1
+
+    nj   = X_grid_raw.shape[1] - 1
+    njp1 = X_grid_raw.shape[1]
+    njp2 = X_grid_raw.shape[1] + 1
+
+    nk   = X_grid_raw.shape[2] - 1
+    nkp1 = X_grid_raw.shape[2]
+    nkp2 = X_grid_raw.shape[2] + 1
+
+    X_grid = np.zeros((ni, njp2, nkp1))
+    Y_grid = np.zeros((ni, njp2, nkp1))
+    Z_grid = np.zeros((ni, njp2, nkp1))
+    
+    X_grid[:, 1:-1, :-1] = _calc_cell_centers(X_grid_raw)
+    Y_grid[:, 1:-1, :-1] = _calc_cell_centers(Y_grid_raw)
+    Z_grid[:, 1:-1, :-1] = _calc_cell_centers(Z_grid_raw)
+    
+    jAxis = 0
+    axisCoord = np.zeros(3)
+    xyz = np.zeros(3)    
+
+    for j in range(0, njp2, njp1):
+        jAxis = max(1, min(nj, j))
+        for i in range(ni):
+            xyz[:] = 0
+            for k in range(nk):
+                xyz[:] += [X_grid[i, jAxis, k],
+                           Y_grid[i, jAxis, k],
+                           Z_grid[i, jAxis, k]]
+
+            xyz[0] /= nk
+            for k in range(nk):
+                X_grid[i, j, k] = xyz[0]
+                Y_grid[i, j, k] = xyz[1]
+                Z_grid[i, j, k] = xyz[2]
+
+    for j in range(njp2):
+        for i in range(ni):
+            X_grid[i, j, nk] = X_grid[i, j, 0]
+            Y_grid[i, j, nk] = Y_grid[i, j, 0]
+            Z_grid[i, j, nk] = Z_grid[i, j, 0]
+
+    # Convert to units of earth radii (Re)
+    # ------------------------------------------------------------------------
+    X_grid_re = (X_grid * units.cm).to(constants.R_earth).value
+    Y_grid_re = (Y_grid * units.cm).to(constants.R_earth).value
+    Z_grid_re = (Z_grid * units.cm).to(constants.R_earth).value
+
+    return X_grid_re, Y_grid_re, Z_grid_re
+
+
 def get_lfm_hdf4_data(lfm_hdf4_path):
-    """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
-    the grid.
+    """Get a magnetic field data + grid from LDM output. Uses an LFM HDF4 file.
 
     Args
       lfm_hdf4_path: Path to LFM hdf4 file
     Returns
-      mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with dipole
+      mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with LFM dynamic
         field values. Grid is in units of Re and magnetic field is is units o
         Gauss.
     """
-    # Read LFM grid from HDF file and attach units of cm
+    # Load LFM grid centers with singularity patched
+    # ------------------------------------------------------------------------
+    X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
+    
+    # Read LFM B values from HDF file 
     # ------------------------------------------------------------------------
     hdf = SD(lfm_hdf4_path, SDC.READ)
-    X_grid = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
-    Y_grid = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
-    Z_grid = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
 
-    X_grid *= units.cm
-    Y_grid *= units.cm
-    Z_grid *= units.cm
+    Bx_raw = _fix_lfm_hdf4_array_order(hdf.select('bx_').get())
+    By_raw = _fix_lfm_hdf4_array_order(hdf.select('by_').get())
+    Bz_raw = _fix_lfm_hdf4_array_order(hdf.select('bz_').get())
 
-    X_grid = X_grid.to(units.km)   # prevent overflow
-    Y_grid = Y_grid.to(units.km)
-    Z_grid = Z_grid.to(units.km)
     
-    # Read LFM B values from HDF file and attach units of Gauss
+    # This code is Josh Murphy's point2CellCenteredVector() function converted
+    # to python.
     # ------------------------------------------------------------------------
-    Bx = _fix_lfm_hdf4_array_order(hdf.select('bx_').get())
-    By = _fix_lfm_hdf4_array_order(hdf.select('by_').get())
-    Bz = _fix_lfm_hdf4_array_order(hdf.select('bz_').get())
+    ni   = Bx_raw.shape[0] - 1
+    nip1 = Bx_raw.shape[0]
+    nip2 = Bx_raw.shape[0] + 1
 
-    Bx = Bx[:-1, :-1, :-1]
-    By = By[:-1, :-1, :-1]
-    Bz = Bz[:-1, :-1, :-1]
-    
-    Bx *= units.G
-    By *= units.G
-    Bz *= units.G
+    nj   = Bx_raw.shape[1] - 1
+    njp1 = Bx_raw.shape[1]
+    njp2 = Bx_raw.shape[1] + 1
 
+    nk   = Bx_raw.shape[2] - 1
+    nkp1 = Bx_raw.shape[2]
+    nkp2 = Bx_raw.shape[2] + 1
+
+    Bx = np.zeros((ni, njp2, nkp1))
+    By = np.zeros((ni, njp2, nkp1))
+    Bz = np.zeros((ni, njp2, nkp1))
+
+    offsetData = offsetCell = 0
+    tuple = np.zeros(3)
+
+    for k in range(nk):
+        for j in range(nj):
+            for i in range(ni):
+                Bx[i, j+1, k] = Bx_raw[i, j, k]            
+                By[i, j+1, k] = By_raw[i, j, k]
+                Bz[i, j+1, k] = Bz_raw[i, j, k]
+
+    tupleDbl = np.zeros(3)
+    for j in range(0, njp2, njp1):
+        jAxis = max(1, min(nj, j))
+        for i in range(ni):
+            tuple[:] = 0
+
+            for k in range(nk):
+                tuple[:] += [Bx[i, jAxis, k],
+                             By[i, jAxis, k],
+                             Bz[i, jAxis, k]]
+            tuple /= nk
+
+            for k in range(nk):
+                Bx[i, j, k] = tuple[0]
+                By[i, j, k] = tuple[1]
+                Bz[i, j, k] = tuple[2]
+
+    for j in range(njp2):
+        for i in range(ni):
+            Bx[i, j, nk] = Bx[i, j, 0]
+            By[i, j, nk] = By[i, j, 0]
+            Bz[i, j, nk] = Bz[i, j, 0]
+            
     # Create PyVista structured grid.
-    # ------------------------------------------------------------------------
-    X_grid_in_re = (X_grid / constants.R_earth).to(1).value
-    Y_grid_in_re = (Y_grid / constants.R_earth).to(1).value
-    Z_grid_in_re = (Z_grid / constants.R_earth).to(1).value
+    # ------------------------------------------------------------------------    
+    mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
     
-    mesh = pyvista.StructuredGrid(X_grid_in_re, Y_grid_in_re, Z_grid_in_re)
-    
-    B = np.empty((mesh.n_cells, 3))
-    B[:, 0] = _convert_to_pyvista_order(Bx.to(units.G).value)
-    B[:, 1] = _convert_to_pyvista_order(By.to(units.G).value)
-    B[:, 2] = _convert_to_pyvista_order(Bz.to(units.G).value)
-    mesh['B'] = B    
-
-    mesh = mesh.cell_data_to_point_data()
+    B = np.empty((mesh.n_points, 3))
+    B[:, 0] = Bx.flatten(order='F')
+    B[:, 1] = By.flatten(order='F')
+    B[:, 2] = Bz.flatten(order='F')
+    mesh.point_data['B'] = B    
     
     # Return output
     return mesh
 
+              
+def _calc_cell_centers(A):
+    """Calculates centers of cells on a 3D grid.
 
+    Args
+      3D grid holding grid locations on one axis.
+    Returns
+      Grid centers along that axis.    
+    """
+    s = A.shape
+
+    centers = np.zeros((s[0]-1, s[1]-1, s[2]-1))
+    
+    centers += A[:-1, :-1, :-1]  # i,   j,   k
+
+    centers += A[1:, :-1, :-1]   # i+1, j,   k
+    centers += A[:-1, 1:, :-1]   # i,   j+1, k
+    centers += A[:-1, :-1, 1:]   # i,   j,   k+1
+
+    centers += A[1:, 1:, :-1]    # i+1, j+1, k
+    centers += A[:-1, 1:, 1:]    # i,   j+1, k+1
+    centers += A[1:, :-1, 1:]    # i+1, j,   k+1
+    
+    centers += A[1:, 1:, 1:]     # i+1, j+1, k+1
+
+    centers /= 8.0
+
+    return centers
+
+   
 def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
                              lfm_hdf4_path, time=datetime(1970, 1, 1),
                              n_jobs=-1, verbose=1000):
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
-l
+
     Args
       lfm_hdf4_path: Path to LFM hdf4 file      
       time: Time for T89 model, sets parameters
@@ -200,38 +291,15 @@ l
         field values. Grid is in units of Re and magnetic field is is units of
         Gauss.
     """
-    # Read LFM grid from HDF file and convert to units of km and re
+    # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
-    hdf = SD(lfm_hdf4_path, SDC.READ)
-    X_hdf_grid = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
-    Y_hdf_grid = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
-    Z_hdf_grid = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
-    X_hdf_grid *= units.cm
-    Y_hdf_grid *= units.cm
-    Z_hdf_grid *= units.cm
-
-    X_km_sm_grid = X_hdf_grid.to(units.km).value
-    Y_km_sm_grid = Y_hdf_grid.to(units.km).value
-    Z_km_sm_grid = Z_hdf_grid.to(units.km).value
-
-    X_re_sm_grid = X_hdf_grid.to(constants.R_earth).value
-    Y_re_sm_grid = Y_hdf_grid.to(constants.R_earth).value
-    Z_re_sm_grid = Z_hdf_grid.to(constants.R_earth).value
-    
-    # Compute cell centers to evaluate T96 at
-    # ------------------------------------------------------------------------
-    cell_centers = (
-        pyvista.StructuredGrid(X_km_sm_grid, Y_km_sm_grid, Z_km_sm_grid)
-        .cell_centers()
+    X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid = (
+        _get_fixed_lfm_grid_centers(lfm_hdf4_path)
     )
-    x_km_sm = cell_centers.points[:, 0] * units.km
-    y_km_sm = cell_centers.points[:, 1] * units.km
-    z_km_sm = cell_centers.points[:, 2] * units.km
-    num_cells = cell_centers.points.shape[0]
     
-    x_re_sm = x_km_sm.to(constants.R_earth).value
-    y_re_sm = y_km_sm.to(constants.R_earth).value
-    z_re_sm = z_km_sm.to(constants.R_earth).value
+    x_re_sm = X_re_sm_grid.flatten(order='F')  # flat arrays, easier for later
+    y_re_sm = Y_re_sm_grid.flatten(order='F')
+    z_re_sm = Z_re_sm_grid.flatten(order='F')
 
     # Calibrate geopack using the specified time and convert grid to GSM using
     # dipole tilt
@@ -251,7 +319,7 @@ l
     params = (dynamic_pressure, Dst, By_imf, Bz_imf, 0, 0, 0, 0, 0, 0)
     tasks = []
 
-    for i in range(num_cells):    
+    for i in range(x_re_gsm.shape[0]):
         task = delayed(_t96_parallel_helper)(
             i, params, x_re_gsm[i], y_re_gsm[i], z_re_gsm[i], dipole_tilt
         )
@@ -262,7 +330,7 @@ l
 
     # Repopulate parallel results into single array and convert to SM
     # coordinates
-    B_shape = (3, num_cells)
+    B_shape = (3, x_re_gsm.shape[0])
     B_internal = np.zeros(B_shape)          # GSM Coordinates
     B_external = np.zeros(B_shape)          # GSM Coordinates
 
@@ -277,17 +345,14 @@ l
     # ------------------------------------------------------------------------
     mesh = pyvista.StructuredGrid(X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid)
     
-    B = np.empty((mesh.n_cells, 3))
+    B = np.empty((mesh.n_points, 3))
     B[:, 0] = B_t96[0, :].to(units.G).value
     B[:, 1] = B_t96[1, :].to(units.G).value
     B[:, 2] = B_t96[2, :].to(units.G).value
-    mesh['B'] = B
-
-    mesh = mesh.cell_data_to_point_data()
+    mesh.point_data['B'] = B
     
     # Return output
     return mesh
-
 
 
 def _t96_parallel_helper(i, params, x_re_gsm, y_re_gsm, z_re_gsm, dipole_tilt):

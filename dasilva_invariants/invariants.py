@@ -73,7 +73,9 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=N
         max_step_length = step_size
         min_step_length = step_size
         initial_step_length = step_size
-
+  
+    #starting_point = (starting_point[0], 0, -1)
+    
     trace = mesh.streamlines(
         'B',
         start_position=starting_point,
@@ -82,8 +84,13 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=N
         min_step_length=min_step_length,
         initial_step_length=initial_step_length,
         step_unit='l',
-        max_steps=1_000_000,   
+        max_steps=1_000_000,
+        interpolator_type='c'
     )
+
+    if trace.n_points == 0:
+        raise RuntimeError('Trace returned empty')
+    
     trace_field_strength = np.linalg.norm(trace['B'], axis=1)
 
     # Get the trace latitudes and Bm if not specified
@@ -264,7 +271,6 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
             current_rvalue, upper_rvalue = \
                 ((lower_rvalue + current_rvalue) / 2, current_rvalue)
             #print('Too high!')
-            
         
     # If the code reached this point, the maximum number of iterations
     # was exhausted.
