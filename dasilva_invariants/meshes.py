@@ -45,7 +45,7 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
       lfm_hdf4_path: Path to LFM hdf4 file
     Returns
       mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with dipole
-        field values. Grid is in units of Re and magnetic field is is units o
+        field values. Grid is in units of Re and magnetic field is is units of
         Gauss.
     """
     # Load LFM grid centers with singularity patched
@@ -181,7 +181,6 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     By_raw = _fix_lfm_hdf4_array_order(hdf.select('by_').get())
     Bz_raw = _fix_lfm_hdf4_array_order(hdf.select('bz_').get())
 
-    
     # This code is Josh Murphy's point2CellCenteredVector() function converted
     # to python.
     # ------------------------------------------------------------------------
@@ -252,9 +251,10 @@ def _calc_cell_centers(A):
     """Calculates centers of cells on a 3D grid.
 
     Args
-      3D grid holding grid locations on one axis.
+      3D grid holding grid positions on one of X, Y or Z for each grid 
+      coordinate.
     Returns
-      Grid centers along that axis.    
+      3D array of X, Y, or Z positions for grid coordinates
     """
     s = A.shape
 
