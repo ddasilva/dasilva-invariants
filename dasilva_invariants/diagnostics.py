@@ -22,7 +22,8 @@ def do_all(mesh, model_title):
         tail_K_vs_radius,
         drift_shells,
         dayside_field_intensities,
-        equitorial_plot_of_intensity
+        equitorial_plot_of_intensity,
+        K_integrand_plot,
     ]
 
     for func in funcs:
@@ -46,8 +47,6 @@ def tail_traces(mesh, model_title, th=180, r_min=3, r_max=9):
         x, y = np.cos(np.deg2rad(th)) * r, np.sin(np.deg2rad(th)) * r
         result = invariants.calculate_K(mesh, (x, y, 0), 7.5)
 
-        mask = result.trace_field_strength < result.Bm
-
         plt.scatter(x=result.trace_points[:, 0],
                     y=result.trace_points[:, 2],
                     c=np.log10(result.trace_field_strength),
@@ -62,7 +61,8 @@ def tail_traces(mesh, model_title, th=180, r_min=3, r_max=9):
     plt.xlabel('X (Re)')
     plt.ylabel('Z (Re)')
     plt.grid(color='#ccc', linestyle='dashed')
-    plt.title(f'{model_title}\nField Line Trace between R={rs[0]} and R={rs[-1]}')
+    plt.title(f'{model_title}\nField Line Trace between '
+              f'R={rs[0]} and R={rs[-1]}')
     plt.xlim(plt.xlim()[::-1])
 
 
@@ -124,7 +124,8 @@ def drift_shells(mesh, model_title, th=180, r_min=3, r_max=9):
         plt.plot(x, y, label=f'R = {r:.1f} Re', color=cmap(i/len(results)))
         plt.legend(ncol=1, loc='center left', bbox_to_anchor=(1, 0.5))
         plt.grid(color='#ccc', linestyle='dashed')
-        plt.title(f'{model_title}\nDrift Shells between R={rs[0]} and R={rs[-1]}')
+        plt.title(f'{model_title}\nDrift Shells between R={rs[0]} '
+                  f'and R={rs[-1]}')
         plt.xlabel('X (Re)')
         plt.ylabel('Y (Re)')
         plt.xlim(r_max * 1.25, -r_max * 1.25)
@@ -153,14 +154,16 @@ def dayside_field_intensities(mesh, model_title, th=0, r_min=3, r_max=7):
     for i, r in enumerate(rs):
         x, y = np.cos(np.deg2rad(th)) * r, np.sin(np.deg2rad(th)) * r
         result = invariants.calculate_K(mesh, (x, y, 0), 7.5, step_size=None)
-        rel_position = np.arange(result.trace_latitude.size) /  result.trace_latitude.size
+        rel_position = np.arange(result.trace_latitude.size, dtype=float)
+        rel_position /= result.trace_latitude.size
         
         plt.plot(rel_position, result.trace_field_strength, ',-',
                  label=f'r={r}', color=cmap(i/rs.size))
         plt.xlabel('Relative Position in Trace')
         
         plt.ylabel('|B| (Gauss)')
-        plt.title(f'{model_title}\nTrace from (x,y,z)=(r,0,0) with Bm at 7.5 deg')
+        plt.title(f'{model_title}\nTrace from (x,y,z)=(r,0,0) '
+                  f'with Bm at 7.5 deg')
         plt.yscale('log')
         plt.legend(ncol=1, loc='center left', bbox_to_anchor=(1, 0.5))
         plt.grid(color='#ccc', linestyle='dashed')
@@ -176,21 +179,20 @@ def equitorial_plot_of_intensity(mesh, model_title):
     def _get_eq_slice(data):
         # Adapted from PyLTR
         nk = data.shape[2]-1
-        dusk = data[:,:,0]
-        dawn = data[:,:,nk//2]
-        dawn = dawn[:,::-1]
-        eq = np.hstack( (dusk,dawn[:,1:]) )
-        eq_c = 0.25*( eq[:-1,:-1]+eq[:-1,1:]+eq[1:,:-1]+eq[1:,1:] )
-        eq_c = np.append(eq_c.transpose(),[eq_c[:,0]],axis=0).transpose()
+        dusk = data[:, :, 0]
+        dawn = data[:, :, nk//2]
+        dawn = dawn[:, ::-1]
+        eq = np.hstack((dusk, dawn[:, 1:]))
+        eq_c = 0.25*(eq[:-1, :-1] + eq[:-1, 1:] + eq[1:, :-1] + eq[1:, 1:])
+        eq_c = np.append(eq_c.transpose(), [eq_c[:, 0]], axis=0).transpose()
         return eq_c
 
     Xeq = _get_eq_slice(mesh.x)
     Yeq = _get_eq_slice(mesh.y)
-    Zeq = _get_eq_slice(mesh.z)
 
     B = np.linalg.norm(mesh['B'], axis=1)
     s = mesh.x.shape
-    B= np.reshape(B.ravel(), s, order='F')
+    B = np.reshape(B.ravel(), s, order='F')
     Beq = _get_eq_slice(B)
 
     plt.figure(figsize=(12, 7))
@@ -215,16 +217,16 @@ def K_integrand_plot(mesh, model_title, r=7, th=180):
     result = invariants.calculate_K(mesh, (x, y, 0), mirror_deg)
 
     plt.figure(figsize=(8, 4))
-
     plt.plot(result.integral_axis_latitude, result.integral_integrand, 'k.-')
     plt.fill_between(result.integral_axis_latitude,
                      result.integral_integrand.min(),
                      result.integral_integrand)
     plt.title(f'{model_title}\n'
               f'K = {result.K:.6f} Re Sqrt(G) = '
-              '$\int_{s_m}^{s_m\'}\sqrt{B_m - B(s)}ds$\n'
+              r'$\int_{s_m}^{s_m}\sqrt{B_m - B(s)}ds$'
+              f'\n'
               f'Bm = {result.Bm:.6f} G\n'
               f'Mirror at {mirror_deg:.1f} deg',
               fontsize=20)
     plt.xlabel('Latitude (deg)', fontsize=20)
-    plt.ylabel('$\sqrt{B_m - B(s)}$', fontsize=20)
+    plt.ylabel(r'$\sqrt{B_m - B(s)}$', fontsize=20)

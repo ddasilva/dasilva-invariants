@@ -33,14 +33,22 @@ class CalculateKResult:
 
 @dataclass
 class CalculateLStarResult:
-    """Class to hold the return value of calculate_LStar()
-    """
+    """Class to hold the return value of calculate_LStar()"""
     drift_local_times: np.array        # magnetic local times of drift shell
     drift_rvalues: np.array            # radius drift shell at local time
     drift_K: np.array                  # drift shell K values 
 
     
-def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=None):
+class FieldLineTraceReturnedEmpty(RuntimeError):
+    """Raised when a field line trace is performed but the result is empty."""
+
+    
+class DriftShellBisectionDoesntConverge(RuntimeError):
+    """Raised when Bisection to determine the drift shell doesn't converge."""
+    
+    
+def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
+                step_size=None):
     """Calculate the K adiabatic invariant.
 
     Either mirror_latitude or Bm must be specified.
@@ -57,11 +65,11 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=N
     # Validate function arguments
     # ------------------------------------------------------------------------
     if (mirror_latitude is None) and (Bm is None):
-        raise RuntimeError('Either of the keyword argumets "mirror_latitude" '
-                           'or "Bm" must be specified.')
+        raise ValueError('Either of the keyword argumets "mirror_latitude" '
+                         'or "Bm" must be specified.')
     elif (mirror_latitude is not None) and (Bm is not None):
-        raise RuntimeError('Only one of the keyword arguments '
-                           '"mirror_latitude" or "Bm" must be specified.')
+        raise ValueError('Only one of the keyword arguments '
+                         '"mirror_latitude" or "Bm" must be specified.')
 
     # Calculate field line trace
     # ------------------------------------------------------------------------
@@ -74,8 +82,6 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=N
         min_step_length = step_size
         initial_step_length = step_size
   
-    #starting_point = (starting_point[0], 0, -1)
-    
     trace = mesh.streamlines(
         'B',
         start_position=starting_point,
@@ -89,7 +95,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None, step_size=N
     )
 
     if trace.n_points == 0:
-        raise RuntimeError('Trace returned empty')
+        raise FieldLineTraceReturnedEmpty('Trace returned empty')
     
     trace_field_strength = np.linalg.norm(trace['B'], axis=1)
 
@@ -163,8 +169,8 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     # Determine list of local times we will search
     # ------------------------------------------------------------------------
     starting_r, starting_phi, starting_theta = cs.cart2sp(*starting_point)
-    drift_local_times = starting_phi + (2 * np.pi *
-        np.arange(num_local_times) / num_local_times
+    drift_local_times = starting_phi + (
+        2 * np.pi * np.arange(num_local_times) / num_local_times
     )
     
     # Calculate K at the current local time.
@@ -225,11 +231,11 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
       local_time: starting local time (radians, float)
       starting_theta: starting latitude (radians, float)
       max_iters: Maximum number of iterations before erroring out (int)
-      rel_error_threshold: Relative error threshold to consider two K's equal 
+      rel_error_threshold: Relative error threshold to consider two K's equal
         (float between [0, 1]).
     Returns
-      rvalue: lshell number at given local time which produces the same K on the
-        given mesh (float)
+      rvalue: lshell number at given local time which produces the same K on 
+        the given mesh (float)
     Raises
       RuntimeError: maximum number of iterations reached
     """
@@ -242,7 +248,7 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
     rel_errors = []
     
     for _ in range(max_iters):
-        #print(lower_rvalue, upper_rvalue, current_rvalue)
+        # print(lower_rvalue, upper_rvalue, current_rvalue)
         
         current_starting_point = cs.sp2cart(
             r=current_rvalue, phi=local_time, theta=starting_theta
@@ -263,19 +269,19 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
                                
             current_rvalue, lower_rvalue = \
                 ((upper_rvalue + current_rvalue) / 2, current_rvalue)
-            #print('Too Low!')
+            # print('Too Low!')
         else:
             # too high!
             rel_errors.append((rel_error, 'too_high', current_rvalue))
 
             current_rvalue, upper_rvalue = \
                 ((lower_rvalue + current_rvalue) / 2, current_rvalue)
-            #print('Too high!')
+            # print('Too high!')
         
     # If the code reached this point, the maximum number of iterations
     # was exhausted.
     # ------------------------------------------------------------------------
-    raise RuntimeError(
+    raise DriftShellBisectionDoesntConverge(
         f'Maximum number of iterations {max_iters} reached for local time '
         f'{local_time:.1f} during bisection ' + repr(rel_errors)
-    )
+    )    

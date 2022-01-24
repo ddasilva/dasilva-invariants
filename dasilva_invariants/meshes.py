@@ -52,16 +52,16 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     # ------------------------------------------------------------------------
     X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
 
-    x_re = X_grid.flatten(order='F') # flat arrays, easier later
+    x_re = X_grid.flatten(order='F')  # flat arrays, easier later
     y_re = Y_grid.flatten(order='F')
     z_re = Z_grid.flatten(order='F')
 
-    # Calculate dipole model 
+    # Calculate dipole model
     # ------------------------------------------------------------------------
     # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
     r_re = np.sqrt(x_re**2 + y_re**2 + z_re**2)
-        
-    B0 = 30e3 
+
+    B0 = 30e3
     Bx = 3 * x_re * z_re * B0 / r_re**5
     By = 3 * y_re * z_re * B0 / r_re**5
     Bz = (3 * z_re**2 - r_re**2) * B0 / r_re**5
