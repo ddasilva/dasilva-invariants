@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from ai import cs
+from joblib import delayed, Parallel
 import numpy as np
 
 
@@ -34,9 +35,14 @@ class CalculateKResult:
 @dataclass
 class CalculateLStarResult:
     """Class to hold the return value of calculate_LStar()"""
+    LStar: float                       # Third adiabatic invariant (L*)       
     drift_local_times: np.array        # magnetic local times of drift shell
     drift_rvalues: np.array            # radius drift shell at local time
-    drift_K: np.array                  # drift shell K values 
+    drift_K: np.array                  # drift shell K values, shorthand
+    drift_K_results: np.array          # drift shell results from calculate_K()
+    integral_axis: np.array            # integration axis local time (radians) 
+    integral_theta: np.array           # integration theta variable
+    integral_integrand: np.array       # integration integran
 
     
 class FieldLineTraceReturnedEmpty(RuntimeError):
@@ -148,8 +154,9 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
 
 
 def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
-                    num_local_times=4, rel_error_threshold=0.03,
-                    max_iters=100, trace_step_size=None, verbose=False):
+                    num_local_times=12, rel_error_threshold=0.03,
+                    n_jobs=-1, max_iters=100, trace_step_size=None,
+                    verbose=1000):
     """Calculate the L* adiabatic invariant.
    
     Args
@@ -161,14 +168,17 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         point (float)
       num_local_times: Number of local times spaced evenly around the
         drift shell to solve for with bisection (int)
-      rel_error_threshold: bisection search pararameter in [0, 1] (float)
+      n_jobs: number of jobs to run in parallel (-1 for all cores). doesn't
+        parallelize that well.
+      rel_error_threshold: bisection search pararameter in [0, 1] (float)       
       max_iters: maximum iterations befor erroring out (int)
+      verbose: verbosity level, see joblib.Parallel for more info
     Returns
       result: instance of CalculateLStarResult
     """
     # Determine list of local times we will search
     # ------------------------------------------------------------------------
-    starting_r, starting_phi, starting_theta = cs.cart2sp(*starting_point)
+    starting_r, starting_theta, starting_phi = cs.cart2sp(*starting_point)
     drift_local_times = starting_phi + (
         2 * np.pi * np.arange(num_local_times) / num_local_times
     )
@@ -190,30 +200,74 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     # method. The first element in the drift_rvalues array is not in the
     # loop because it is not done with bisection.
     # ------------------------------------------------------------------------
-    drift_rvalues = np.zeros_like(drift_local_times)
-    drift_K = np.zeros_like(drift_local_times)
-    
-    drift_rvalues[0] = starting_rvalue
-    drift_K[0] = starting_result.K
+    # Calculate each local time in parallel-- an embaressingly parallel
+    # problem. Tasks is of size n_drift_times - 1, holds tasks for all
+    # but the first.
+    tasks = [] 
     
     for i, local_time in enumerate(drift_local_times):
         if i == 0:
             continue
-        if verbose:
-            print(f'Calculating drift radius {i+1}/{drift_rvalues.size}')
 
-        drift_rvalues[i], drift_K[i] = _bisect_rvalue_by_K(
+        task = delayed(_bisect_rvalue_by_K)(
             mesh, starting_result.K, starting_result.Bm,
             starting_rvalue, local_time, starting_theta,
             max_iters, rel_error_threshold, trace_step_size,
         )
+        tasks.append(task)
 
+    parallel_results = Parallel(verbose=verbose, n_jobs=n_jobs, batch_size=1,
+                                backend='threading')(tasks)
+
+    # Extract parallel results into arrays which correspond in index to
+    # drift_local_times
+    drift_rvalues = np.zeros_like(drift_local_times)
+    drift_K_results = np.zeros_like(drift_local_times, dtype=object)
+
+    drift_rvalues[0] = starting_rvalue
+    drift_K_results[0] = starting_result
+
+    for i, parallel_result in enumerate(parallel_results):
+        drift_rvalues[i + 1], drift_K_results[i + 1] = parallel_result
+        
+    # Calculate L*
+    # This method assumes a dipole below the innery boundary, and integrates
+    # around the local times using stokes law with B = curl A. 
+    # -----------------------------------------------------------------------
+    inner_rvalue = np.linalg.norm(mesh.points, axis=1).min()
+    surface_rvalue = 1
+    
+    trace_north_latitudes = np.array(
+        [result.trace_latitude.max() for result in drift_K_results],
+        dtype=float
+    )
+    
+    integral_theta = np.zeros(drift_K_results.size + 1) 
+    integral_theta[:-1] = np.deg2rad(90 - trace_north_latitudes)  # colatitude
+    integral_theta[-1] = integral_theta[0]
+
+    integral_axis = np.zeros(drift_local_times.size + 1)
+    integral_axis[:-1] = drift_local_times
+    integral_axis[-1] = integral_axis[0] + 2 * np.pi
+    
+    integral_integrand = np.sin(integral_theta)**2
+    integral = np.trapz(integral_integrand, integral_axis)
+    
+    LStar = 2 * np.pi * (inner_rvalue / surface_rvalue) / integral
+    
     # Return results
     # ------------------------------------------------------------------------    
+    drift_K = np.array([result.K for result in drift_K_results], dtype=float)
+
     return CalculateLStarResult(
+        LStar=LStar,
         drift_local_times=drift_local_times,
         drift_rvalues=drift_rvalues,
-        drift_K=drift_K
+        drift_K=drift_K,
+        drift_K_results=drift_K_results,
+        integral_axis=integral_axis,
+        integral_theta=integral_theta,
+        integral_integrand=integral_integrand
     )
     
 
@@ -234,8 +288,10 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
       rel_error_threshold: Relative error threshold to consider two K's equal
         (float between [0, 1]).
     Returns
-      rvalue: lshell number at given local time which produces the same K on 
+      rvalue: radius at given local time which produces the same K on 
         the given mesh (float)
+      calculate_k_result: instance of CalculateKResult corresponding to
+        radius and calculate_K().
     Raises
       RuntimeError: maximum number of iterations reached
     """
@@ -248,8 +304,7 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
     rel_errors = []
     
     for _ in range(max_iters):
-        # print(lower_rvalue, upper_rvalue, current_rvalue)
-        
+        # print(lower_rvalue, upper_rvalue, current_rvalue)  
         current_starting_point = cs.sp2cart(
             r=current_rvalue, phi=local_time, theta=starting_theta
         )
@@ -262,7 +317,7 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
         
         if rel_error < rel_error_threshold:
             # match found!
-            return current_rvalue, current_result.K
+            return current_rvalue, current_result
         elif current_result.K < target_K:
             # too low!
             rel_errors.append((rel_error, 'too_low', current_rvalue))

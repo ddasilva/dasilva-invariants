@@ -230,3 +230,37 @@ def K_integrand_plot(mesh, model_title, r=7, th=180):
               fontsize=20)
     plt.xlabel('Latitude (deg)', fontsize=20)
     plt.ylabel(r'$\sqrt{B_m - B(s)}$', fontsize=20)
+
+
+def LStar_integrand_plot(mesh, model_title, r=7, th=0, LStar_kwargs={}):
+    """Plot LStar integrand versus integration axis.
+
+    Args
+      mesh: grid and magnetic field, loaded using meshes module
+      model_title: Title of magnetic field model, used in title of plot
+    """
+    mirror_deg = 7.5
+    x, y = np.cos(np.deg2rad(th)) * r, np.sin(np.deg2rad(th)) * r
+    result = invariants.calculate_LStar(mesh, (x, y, 0), mirror_deg,
+                                        **LStar_kwargs)
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(result.integral_axis, result.integral_integrand, 'k.-')
+    plt.fill_between(result.integral_axis,
+                     result.integral_integrand.min(),
+                     result.integral_integrand)
+
+    for delta_local_time in [0, np.pi, 2 * np.pi]:
+        plt.axvline(result.integral_axis.min() + delta_local_time,
+                    color='black', linestyle='dashed')
+        
+    plt.title(f'{model_title}\n'
+              f'L* = {result.LStar:.6f} = '
+              r'$2 \pi (R_{in}/R_E) / \int_{0}^{2\pi} sin^2(\theta) d\phi$'
+              f'\n'
+              f'Mirror at {mirror_deg:.1f} deg',
+              fontsize=20)
+    plt.xlabel('Local time (radians about sun-earth line)', fontsize=20)
+    plt.ylabel(r'$sin^2(\theta)$', fontsize=20)
+
+    
