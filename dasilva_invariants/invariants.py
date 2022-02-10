@@ -6,11 +6,15 @@ The following methods are key:
 """
 
 from dataclasses import dataclass
+import os
+import tempfile
 from typing import Tuple
 
 from ai import cs
 from joblib import delayed, Parallel
 import numpy as np
+import pyvista
+from scipy import interpolate
 
 
 @dataclass
@@ -154,9 +158,9 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
 
 
 def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
-                    num_local_times=12, rel_error_threshold=0.03,
-                    n_jobs=-1, max_iters=100, trace_step_size=None,
-                    verbose=1000):
+                    num_local_times=12, interp_local_times=True,
+                    interp_npoints=1024, rel_error_threshold=0.03, n_jobs=-1,
+                    max_iters=100, trace_step_size=None, verbose=1000):
     """Calculate the L* adiabatic invariant.
    
     Args
@@ -168,10 +172,15 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         point (float)
       num_local_times: Number of local times spaced evenly around the
         drift shell to solve for with bisection (int)
+      interp_local_times: Interpolate intersection latitudes for local times
+        with cubic splines to allow for less local time calculation.
+      interp_npoints: Number of points to use in interplation, only active
+        if interp_local_times=True.
       n_jobs: number of jobs to run in parallel (-1 for all cores). doesn't
         parallelize that well.
       rel_error_threshold: bisection search pararameter in [0, 1] (float)       
       max_iters: maximum iterations befor erroring out (int)
+      trace_step_siz
       verbose: verbosity level, see joblib.Parallel for more info
     Returns
       result: instance of CalculateLStarResult
@@ -200,9 +209,12 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     # method. The first element in the drift_rvalues array is not in the
     # loop because it is not done with bisection.
     # ------------------------------------------------------------------------
-    # Calculate each local time in parallel-- an embaressingly parallel
-    # problem. Tasks is of size n_drift_times - 1, holds tasks for all
-    # but the first.
+    # Calculate each local time in parallel-- an embaressingly parallel 
+    # problem. Tasks is of size n_drift_times - 1, holds tasks for all but the
+    # first.
+    _, mesh_tempfile = tempfile.mkstemp(suffix='.vtk')
+    mesh.save(mesh_tempfile)   # avoid pickling meshes; instead pass filename
+
     tasks = [] 
     
     for i, local_time in enumerate(drift_local_times):
@@ -210,15 +222,16 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
             continue
 
         task = delayed(_bisect_rvalue_by_K)(
-            mesh, starting_result.K, starting_result.Bm,
+            mesh_tempfile, starting_result.K, starting_result.Bm,
             starting_rvalue, local_time, starting_theta,
             max_iters, rel_error_threshold, trace_step_size,
         )
         tasks.append(task)
 
     parallel_results = Parallel(verbose=verbose, n_jobs=n_jobs, batch_size=1,
-                                backend='threading')(tasks)
-
+                                backend='multiprocessing')(tasks)
+    os.remove(mesh_tempfile)
+    
     # Extract parallel results into arrays which correspond in index to
     # drift_local_times
     drift_rvalues = np.zeros_like(drift_local_times)
@@ -241,18 +254,37 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         [result.trace_latitude.max() for result in drift_K_results],
         dtype=float
     )
-    
-    integral_theta = np.zeros(drift_K_results.size + 1) 
-    integral_theta[:-1] = np.deg2rad(90 - trace_north_latitudes)  # colatitude
-    integral_theta[-1] = integral_theta[0]
 
-    integral_axis = np.zeros(drift_local_times.size + 1)
-    integral_axis[:-1] = drift_local_times
-    integral_axis[-1] = integral_axis[0] + 2 * np.pi
+    if interp_local_times:
+        # Interpolate with cubic spline with periodic boundary condition
+        # that forces the 1st and 2nd derivatives to be equal at the first
+        # and last points
+        spline_x = np.zeros(drift_K_results.size + 1)
+        spline_y = np.zeros(drift_K_results.size + 1)
+
+        spline_x[:-1] = drift_local_times
+        spline_x[-1] = drift_local_times[0] + 2 * np.pi
+
+        spline_y[:-1] = trace_north_latitudes
+        spline_y[-1] = trace_north_latitudes[0]
+                       
+        spline = interpolate.CubicSpline(spline_x, spline_y, bc_type='periodic')
+
+        integral_axis = np.linspace(spline_x.min(),
+                                    spline_x.max(),
+                                    interp_npoints)
+        integral_theta = np.pi/2 - spline(integral_axis)  # colatitude        
+    else:
+        integral_axis = np.zeros(drift_local_times.size + 1)
+        integral_axis[:-1] = drift_local_times
+        integral_axis[-1] = integral_axis[0] + 2 * np.pi
     
+        integral_theta = np.zeros(drift_K_results.size + 1) 
+        integral_theta[:-1] = np.pi/2 - trace_north_latitudes  # colatitude
+        integral_theta[-1] = integral_theta[0]
+
     integral_integrand = np.sin(integral_theta)**2
-    integral = np.trapz(integral_integrand, integral_axis)
-    
+    integral = np.trapz(integral_integrand, integral_axis)   
     LStar = 2 * np.pi * (inner_rvalue / surface_rvalue) / integral
     
     # Return results
@@ -271,14 +303,15 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     )
     
 
-def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
+def _bisect_rvalue_by_K(mesh_tempfile, target_K, Bm, starting_rvalue, local_time,
                         starting_theta, max_iters, rel_error_threshold,
                         step_size):
     """Internal helper function to calculate_LStar(). Applies bisection method
     to find an radius with an equal K.
 
     Args
-      mesh: grid and magnetic field, loaded using meshes module
+      mesh_tempfile: path to grid and magnetic field, loaded using 
+        pyvsita
       target_K: floating point K value to search for (float)
       Bm: magnetic mirroring point; parameter used to estimte K (float)
       starting_rvalue: starting point rvalue (float)
@@ -298,6 +331,7 @@ def _bisect_rvalue_by_K(mesh, target_K, Bm, starting_rvalue, local_time,
     # Perform bisection method. If you are not sure what this is, it is
     # advised you read about bisection on wikipedia first.
     # ------------------------------------------------------------------------
+    mesh = pyvista.read(mesh_tempfile)
     upper_rvalue = starting_rvalue * 2
     lower_rvalue = np.linalg.norm(mesh.points, axis=1).min()
     current_rvalue = starting_rvalue
