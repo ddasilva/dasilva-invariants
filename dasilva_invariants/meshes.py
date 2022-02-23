@@ -279,13 +279,21 @@ def _calc_cell_centers(A):
    
 def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
                              lfm_hdf4_path, time=datetime(1970, 1, 1),
-                             n_jobs=-1, verbose=1000):
+                             force_zero_tilt=True, n_jobs=-1, verbose=1000):
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
     Args
+      dynamic_pressure: Dynamic Pressure of Solar Wind (nPA); parameter of
+        T96 Model
+      Dst: Disturbance storm time index; parameter of T96 model
+      By_imf: Y component of IMF Field (nT); parameter of T96 Model
+      Bz_imf: Z component of IMF Field (nT); parameter of T96 Model
       lfm_hdf4_path: Path to LFM hdf4 file      
       time: Time for T89 model, sets parameters
+      force_zero_tilt: Force a zero tilt when calculating the file
+      n_jobs: Number of parallel processes to use (-1 for all available cores)
+      verbose: Verbosity level (see joblib.Parallel documentation)
     Returns
       mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with dipole
         field values. Grid is in units of Re and magnetic field is is units of
@@ -306,10 +314,13 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
     # ------------------------------------------------------------------------
     epoch = datetime(1970, 1, 1)
     seconds = (time - epoch).total_seconds()
-    dipole_tilt = geopack.recalc(seconds)
+    dipole_tilt_t96 = geopack.recalc(seconds)
 
+    if force_zero_tilt:
+        dipole_tilt_t96 = 0.0
+    
     x_re_gsm, y_re_gsm, z_re_gsm = sm_to_gsm(x_re_sm, y_re_sm, z_re_sm,
-                                             dipole_tilt)
+                                             dipole_tilt_t96)
     
     # Calculate the internal (dipole) and external (t96) fields using the
     # geopack module
@@ -318,10 +329,10 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
     # verbosity settings specified by caller
     params = (dynamic_pressure, Dst, By_imf, Bz_imf, 0, 0, 0, 0, 0, 0)
     tasks = []
-
+        
     for i in range(x_re_gsm.shape[0]):
         task = delayed(_t96_parallel_helper)(
-            i, params, x_re_gsm[i], y_re_gsm[i], z_re_gsm[i], dipole_tilt
+            i, params, x_re_gsm[i], y_re_gsm[i], z_re_gsm[i], dipole_tilt_t96
         )
         tasks.append(task)
             
@@ -338,7 +349,7 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
         B_internal[:, i] = internal_field_vec
         B_external[:, i] = external_field_vec
 
-    B_t96 = gsm_to_sm(*(B_internal + B_external), dipole_tilt)
+    B_t96 = gsm_to_sm(*(B_internal + B_external), dipole_tilt_t96)
     B_t96 *= units.nT
 
     # Create PyVista structured grid.

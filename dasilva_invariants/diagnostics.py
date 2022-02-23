@@ -159,14 +159,15 @@ def dayside_field_intensities(mesh, model_title, th=0, r_min=3, r_max=7):
         
         plt.plot(rel_position, result.trace_field_strength, ',-',
                  label=f'r={r}', color=cmap(i/rs.size))
-        plt.xlabel('Relative Position in Trace')
-        
-        plt.ylabel('|B| (Gauss)')
-        plt.title(f'{model_title}\nTrace from (x,y,z)=(r,0,0) '
-                  f'with Bm at 7.5 deg')
-        plt.yscale('log')
-        plt.legend(ncol=1, loc='center left', bbox_to_anchor=(1, 0.5))
-        plt.grid(color='#ccc', linestyle='dashed')
+
+    plt.xlabel('Relative Position in Trace')
+
+    plt.ylabel('|B| (Gauss)')
+    plt.title(f'{model_title}\n'
+              f'with Bm at 7.5 deg')
+    plt.yscale('log')
+    plt.legend(ncol=1, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.grid(color='#ccc', linestyle='dashed')
 
 
 def equitorial_plot_of_intensity(mesh, model_title):
@@ -205,6 +206,43 @@ def equitorial_plot_of_intensity(mesh, model_title):
     plt.ylim(-40, 40)
     
 
+def meridional_plot_of_intensity(mesh, model_title):
+    """Plot meridional plot of field intensity.
+    
+    Args
+      mesh: grid and magnetic field, loaded using meshes module
+      model_title: Title of magnetic field model, used in title of plot
+    """
+    def get_mer_slice(data):
+        # Adapted from pyLTR
+        nk = data.shape[2] - 1
+        north = data[:, :, nk//4]
+        south = data[:, :, 3*nk//4]
+        south = south[:, ::-1] # reverse the j-index
+        mer = np.hstack((north, south[:,1:]))
+        mer_c = 0.25*(mer[:-1,:-1] + mer[:-1,1:] + mer[1:,:-1] + mer[1:,1:])
+        mer_c = np.append(mer_c.transpose(),[mer_c[:,0]],axis=0).transpose()
+        return mer_c
+
+    Xmer = get_mer_slice(mesh.x)
+    Zmer = get_mer_slice(mesh.z)
+
+    B = np.linalg.norm(mesh['B'], axis=1)
+    s = mesh.x.shape
+    B = np.reshape(B.ravel(), s, order='F')
+    Bmer = get_mer_slice(B)
+    
+    plt.figure(figsize=(12, 7))
+    plt.pcolor(Xmer, Zmer, Bmer, norm=LogNorm(vmin=1e-5, vmax=1e-1))
+    plt.title(f'{model_title}\nMeridional Slice')
+    
+    plt.xlabel('X SM (Re)')
+    plt.ylabel('Z SM (Re)')
+    plt.colorbar()
+    plt.xlim(20, -70)
+    plt.ylim(-40, 40)
+    
+    
 def K_integrand_plot(mesh, model_title, r=7, th=180):
     """Plot K integrand versus integration axis.
 
@@ -246,8 +284,9 @@ def LStar_integrand_plot(mesh, model_title, r=7, th=0, LStar_kwargs={}):
 
     plt.figure(figsize=(8, 4))
     plt.plot(result.integral_axis, result.integral_integrand, 'k.-')
+    plt.ylim([.2, .4])
     plt.fill_between(result.integral_axis,
-                     result.integral_integrand.min(),
+                     plt.ylim()[0],
                      result.integral_integrand)
 
     for delta_local_time in [0, np.pi, 2 * np.pi]:
@@ -262,5 +301,4 @@ def LStar_integrand_plot(mesh, model_title, r=7, th=0, LStar_kwargs={}):
               fontsize=20)
     plt.xlabel('Local time (radians about sun-earth line)', fontsize=20)
     plt.ylabel(r'$sin^2(\theta)$', fontsize=20)
-
     
