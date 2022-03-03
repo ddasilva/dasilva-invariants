@@ -23,6 +23,8 @@ def do_all(mesh, model_title):
         drift_shells,
         dayside_field_intensities,
         equitorial_plot_of_intensity,
+        meridional_plot_of_intensity,
+        LStar_integrand_plot,
         K_integrand_plot,
     ]
 
@@ -170,12 +172,18 @@ def dayside_field_intensities(mesh, model_title, th=0, r_min=3, r_max=7):
     plt.grid(color='#ccc', linestyle='dashed')
 
 
-def equitorial_plot_of_intensity(mesh, model_title):
-    """Plot equitorial plot of field indensity.
+def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
+                                 norm=LogNorm(vmin=1e-5, vmax=1e-1),
+                                 cbar_label='|B| (G)'):
+    """Plot equitorial plot of scalar quantity or normed vector quantity.
     
     Args
       mesh: grid and magnetic field, loaded using meshes module
       model_title: Title of magnetic field model, used in title of plot
+      arr_name: Name of array in mesh. If scalar, will be used as is. If vector,
+        will be normed.
+      norm: Matplotlib LogNorm instance (or None) to set colorbar limits
+      cbar_label: string colorbar label
     """
     def _get_eq_slice(data):
         # Adapted from PyLTR
@@ -191,27 +199,37 @@ def equitorial_plot_of_intensity(mesh, model_title):
     Xeq = _get_eq_slice(mesh.x)
     Yeq = _get_eq_slice(mesh.y)
 
-    B = np.linalg.norm(mesh['B'], axis=1)
+    if len(mesh[arr_name].shape) == 1:
+        field = mesh[arr_name]
+    else:
+        field = np.linalg.norm(mesh[arr_name], axis=1)
+
     s = mesh.x.shape
-    B = np.reshape(B.ravel(), s, order='F')
-    Beq = _get_eq_slice(B)
+    F = np.reshape(field.ravel(), s, order='F')   # field
+    Feq = _get_eq_slice(F)
 
     plt.figure(figsize=(12, 7))
     plt.title(f'{model_title}\nEquitorial Slice')
-    plt.pcolor(Xeq, Yeq, Beq, norm=LogNorm(vmin=1e-5, vmax=1e-1))
+    plt.pcolor(Xeq, Yeq, Feq, norm=norm)
     plt.xlabel('X SM (Re)')
     plt.ylabel('Y SM (Re)')
-    plt.colorbar()
+    plt.colorbar().set_label(cbar_label)
     plt.xlim(20, -70)
     plt.ylim(-40, 40)
     
 
-def meridional_plot_of_intensity(mesh, model_title):
-    """Plot meridional plot of field intensity.
+def meridional_plot_of_intensity(mesh, model_title, arr_name='B',
+                                 norm=LogNorm(vmin=1e-5, vmax=1e-1),
+                                 cbar_label='|B| (G)'):
+    """Plot meridional plot of scalar quantity or normed vector quantity.
     
     Args
       mesh: grid and magnetic field, loaded using meshes module
       model_title: Title of magnetic field model, used in title of plot
+      arr_name: Name of array in mesh. If scalar, will be used as is. If vector,
+        will be normed.
+      norm: Matplotlib LogNorm instance (or None) to set colorbar limits
+      cbar_label: string colorbar label
     """
     def get_mer_slice(data):
         # Adapted from pyLTR
@@ -227,18 +245,22 @@ def meridional_plot_of_intensity(mesh, model_title):
     Xmer = get_mer_slice(mesh.x)
     Zmer = get_mer_slice(mesh.z)
 
-    B = np.linalg.norm(mesh['B'], axis=1)
+    if len(mesh[arr_name].shape) == 1:
+        field = mesh[arr_name]
+    else:
+        field = np.linalg.norm(mesh[arr_name], axis=1)
+    
     s = mesh.x.shape
-    B = np.reshape(B.ravel(), s, order='F')
-    Bmer = get_mer_slice(B)
+    F = np.reshape(field.ravel(), s, order='F')   # field
+    Fmer = get_mer_slice(F)
     
     plt.figure(figsize=(12, 7))
-    plt.pcolor(Xmer, Zmer, Bmer, norm=LogNorm(vmin=1e-5, vmax=1e-1))
+    plt.pcolor(Xmer, Zmer, Fmer, norm=norm)
     plt.title(f'{model_title}\nMeridional Slice')
     
     plt.xlabel('X SM (Re)')
     plt.ylabel('Z SM (Re)')
-    plt.colorbar()
+    plt.colorbar().set_label(cbar_label)
     plt.xlim(20, -70)
     plt.ylim(-40, 40)
     
