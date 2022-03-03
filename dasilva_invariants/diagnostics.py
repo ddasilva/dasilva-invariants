@@ -173,7 +173,7 @@ def dayside_field_intensities(mesh, model_title, th=0, r_min=3, r_max=7):
 
 
 def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
-                                 norm=LogNorm(vmin=1e-5, vmax=1e-1),
+                                 norm=LogNorm(vmin=1e-5, vmax=1e-1), cmap='viridis',
                                  cbar_label='|B| (G)'):
     """Plot equitorial plot of scalar quantity or normed vector quantity.
     
@@ -183,6 +183,7 @@ def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
       arr_name: Name of array in mesh. If scalar, will be used as is. If vector,
         will be normed.
       norm: Matplotlib LogNorm instance (or None) to set colorbar limits
+      cmap: string colormap or matplotlib colormap instance
       cbar_label: string colorbar label
     """
     def _get_eq_slice(data):
@@ -209,17 +210,17 @@ def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
     Feq = _get_eq_slice(F)
 
     plt.figure(figsize=(12, 7))
-    plt.title(f'{model_title}\nEquitorial Slice')
-    plt.pcolor(Xeq, Yeq, Feq, norm=norm)
-    plt.xlabel('X SM (Re)')
-    plt.ylabel('Y SM (Re)')
-    plt.colorbar().set_label(cbar_label)
+    plt.title(f'{model_title}\nEquitorial Slice', fontsize=18)
+    plt.pcolor(Xeq, Yeq, Feq, norm=norm, cmap=cmap)
+    plt.xlabel('X SM (Re)', fontsize=16)
+    plt.ylabel('Y SM (Re)', fontsize=16)
+    plt.colorbar().set_label(cbar_label, fontsize=14)
     plt.xlim(20, -70)
     plt.ylim(-40, 40)
     
 
 def meridional_plot_of_intensity(mesh, model_title, arr_name='B',
-                                 norm=LogNorm(vmin=1e-5, vmax=1e-1),
+                                 norm=LogNorm(vmin=1e-5, vmax=1e-1), cmap='viridis',
                                  cbar_label='|B| (G)'):
     """Plot meridional plot of scalar quantity or normed vector quantity.
     
@@ -229,6 +230,7 @@ def meridional_plot_of_intensity(mesh, model_title, arr_name='B',
       arr_name: Name of array in mesh. If scalar, will be used as is. If vector,
         will be normed.
       norm: Matplotlib LogNorm instance (or None) to set colorbar limits
+      cmap: string colormap or matplotlib colormap instance
       cbar_label: string colorbar label
     """
     def get_mer_slice(data):
@@ -255,12 +257,12 @@ def meridional_plot_of_intensity(mesh, model_title, arr_name='B',
     Fmer = get_mer_slice(F)
     
     plt.figure(figsize=(12, 7))
-    plt.pcolor(Xmer, Zmer, Fmer, norm=norm)
-    plt.title(f'{model_title}\nMeridional Slice')
+    plt.pcolor(Xmer, Zmer, Fmer, norm=norm, cmap=cmap)
+    plt.title(f'{model_title}\nMeridional Slice', fontsize=18)
     
-    plt.xlabel('X SM (Re)')
-    plt.ylabel('Z SM (Re)')
-    plt.colorbar().set_label(cbar_label)
+    plt.xlabel('X SM (Re)', fontsize=16)
+    plt.ylabel('Z SM (Re)', fontsize=16)
+    plt.colorbar().set_label(cbar_label, fontsize=14)
     plt.xlim(20, -70)
     plt.ylim(-40, 40)
     
