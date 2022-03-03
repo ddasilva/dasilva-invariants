@@ -61,7 +61,7 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
     r_re = np.sqrt(x_re**2 + y_re**2 + z_re**2)
 
-    B0 = 30e3
+    B0 = -30e3
     Bx = 3 * x_re * z_re * B0 / r_re**5
     By = 3 * y_re * z_re * B0 / r_re**5
     Bz = (3 * z_re**2 - r_re**2) * B0 / r_re**5
@@ -279,7 +279,8 @@ def _calc_cell_centers(A):
    
 def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
                              lfm_hdf4_path, time=datetime(1970, 1, 1),
-                             force_zero_tilt=True, n_jobs=-1, verbose=1000):
+                             external_field_only=False, force_zero_tilt=True,
+                             n_jobs=-1, verbose=1000):
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -291,6 +292,7 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
       Bz_imf: Z component of IMF Field (nT); parameter of T96 Model
       lfm_hdf4_path: Path to LFM hdf4 file      
       time: Time for T89 model, sets parameters
+      external_field_only: Set to True to not include the internal (dipole) model
       force_zero_tilt: Force a zero tilt when calculating the file
       n_jobs: Number of parallel processes to use (-1 for all available cores)
       verbose: Verbosity level (see joblib.Parallel documentation)
@@ -349,7 +351,11 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
         B_internal[:, i] = internal_field_vec
         B_external[:, i] = external_field_vec
 
-    B_t96 = gsm_to_sm(*(B_internal + B_external), dipole_tilt_t96)
+    if external_field_only:
+        B_t96 = gsm_to_sm(*B_external, dipole_tilt_t96)
+    else:
+        B_t96 = gsm_to_sm(*(B_internal + B_external), dipole_tilt_t96)
+
     B_t96 *= units.nT
 
     # Create PyVista structured grid.
