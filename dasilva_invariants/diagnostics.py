@@ -5,9 +5,18 @@ To run all of these, use the do_all() function.
 """
 from . import invariants
 
-from matplotlib.colors import LogNorm
+from astropy import constants, units
+from matplotlib.colors import LogNorm, SymLogNorm
 import pylab as plt
 import numpy as np
+
+from . import utils
+
+
+# Default limits of the magnetosphere cut plots (equitorial and meridional).
+# Note that the "X" and "Y" here are the axis of the matplotlib plot, not SM.
+DEFAULT_MSPHERE_XLIM = (20, -20)
+DEFAULT_MSPHERE_YLIM = (-20, 20)
 
 
 def do_all(mesh, model_title):
@@ -171,10 +180,11 @@ def dayside_field_intensities(mesh, model_title, th=0, r_min=3, r_max=7):
     plt.legend(ncol=1, loc='center left', bbox_to_anchor=(1, 0.5))
     plt.grid(color='#ccc', linestyle='dashed')
 
-
-def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
-                                 norm=LogNorm(vmin=1e-5, vmax=1e-1), cmap='viridis',
-                                 cbar_label='|B| (G)'):
+    
+def equitorial_plot_of_intensity(
+        mesh, model_title, arr_name='B', norm=LogNorm(vmin=1e-5, vmax=1e-1),
+        cmap='viridis', cbar_label='|B| (G)', xlim=DEFAULT_MSPHERE_XLIM,
+        ylim=DEFAULT_MSPHERE_YLIM):
     """Plot equitorial plot of scalar quantity or normed vector quantity.
     
     Args
@@ -185,20 +195,11 @@ def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
       norm: Matplotlib LogNorm instance (or None) to set colorbar limits
       cmap: string colormap or matplotlib colormap instance
       cbar_label: string colorbar label
+    Returns
+      ax: matplotlib axes generated
     """
-    def _get_eq_slice(data):
-        # Adapted from PyLTR
-        nk = data.shape[2]-1
-        dusk = data[:, :, 0]
-        dawn = data[:, :, nk//2]
-        dawn = dawn[:, ::-1]
-        eq = np.hstack((dusk, dawn[:, 1:]))
-        eq_c = 0.25*(eq[:-1, :-1] + eq[:-1, 1:] + eq[1:, :-1] + eq[1:, 1:])
-        eq_c = np.append(eq_c.transpose(), [eq_c[:, 0]], axis=0).transpose()
-        return eq_c
-
-    Xeq = _get_eq_slice(mesh.x)
-    Yeq = _get_eq_slice(mesh.y)
+    Xeq = utils.lfm_get_eq_slice(mesh.x)
+    Yeq = utils.lfm_get_eq_slice(mesh.y)
 
     if len(mesh[arr_name].shape) == 1:
         field = mesh[arr_name]
@@ -207,7 +208,7 @@ def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
 
     s = mesh.x.shape
     F = np.reshape(field.ravel(), s, order='F')   # field
-    Feq = _get_eq_slice(F)
+    Feq = utils.lfm_get_eq_slice(F)
 
     plt.figure(figsize=(12, 7))
     plt.title(f'{model_title}\nEquitorial Slice', fontsize=18)
@@ -215,13 +216,16 @@ def equitorial_plot_of_intensity(mesh, model_title, arr_name='B',
     plt.xlabel('X SM (Re)', fontsize=16)
     plt.ylabel('Y SM (Re)', fontsize=16)
     plt.colorbar().set_label(cbar_label, fontsize=14)
-    plt.xlim(20, -70)
-    plt.ylim(-40, 40)
+    plt.xlim(xlim)
+    plt.ylim(ylim)
+
+    return plt.gca()
     
 
-def meridional_plot_of_intensity(mesh, model_title, arr_name='B',
-                                 norm=LogNorm(vmin=1e-5, vmax=1e-1), cmap='viridis',
-                                 cbar_label='|B| (G)'):
+def meridional_plot_of_intensity(
+        mesh, model_title, arr_name='B', norm=LogNorm(vmin=1e-5, vmax=1e-1),
+        cmap='viridis', cbar_label='|B| (G)', xlim=DEFAULT_MSPHERE_XLIM,
+        ylim=DEFAULT_MSPHERE_YLIM):
     """Plot meridional plot of scalar quantity or normed vector quantity.
     
     Args
@@ -232,20 +236,12 @@ def meridional_plot_of_intensity(mesh, model_title, arr_name='B',
       norm: Matplotlib LogNorm instance (or None) to set colorbar limits
       cmap: string colormap or matplotlib colormap instance
       cbar_label: string colorbar label
+      include_traces: Include l-shell traces for these L numbers
+    Returns
+      ax: matplotlib axes generated
     """
-    def get_mer_slice(data):
-        # Adapted from pyLTR
-        nk = data.shape[2] - 1
-        north = data[:, :, nk//4]
-        south = data[:, :, 3*nk//4]
-        south = south[:, ::-1] # reverse the j-index
-        mer = np.hstack((north, south[:,1:]))
-        mer_c = 0.25*(mer[:-1,:-1] + mer[:-1,1:] + mer[1:,:-1] + mer[1:,1:])
-        mer_c = np.append(mer_c.transpose(),[mer_c[:,0]],axis=0).transpose()
-        return mer_c
-
-    Xmer = get_mer_slice(mesh.x)
-    Zmer = get_mer_slice(mesh.z)
+    Xmer = utils.lfm_get_mer_slice(mesh.x)
+    Zmer = utils.lfm_get_mer_slice(mesh.z)
 
     if len(mesh[arr_name].shape) == 1:
         field = mesh[arr_name]
@@ -254,17 +250,19 @@ def meridional_plot_of_intensity(mesh, model_title, arr_name='B',
     
     s = mesh.x.shape
     F = np.reshape(field.ravel(), s, order='F')   # field
-    Fmer = get_mer_slice(F)
+    Fmer = utils.lfm_get_mer_slice(F)
     
     plt.figure(figsize=(12, 7))
     plt.pcolor(Xmer, Zmer, Fmer, norm=norm, cmap=cmap)
-    plt.title(f'{model_title}\nMeridional Slice', fontsize=18)
-    
+                
+    plt.title(f'{model_title}\nMeridional Slice', fontsize=18)    
     plt.xlabel('X SM (Re)', fontsize=16)
     plt.ylabel('Z SM (Re)', fontsize=16)
     plt.colorbar().set_label(cbar_label, fontsize=14)
-    plt.xlim(20, -70)
-    plt.ylim(-40, 40)
+    plt.xlim(xlim)
+    plt.ylim(ylim)
+
+    return plt.gca()
     
     
 def K_integrand_plot(mesh, model_title, r=7, th=180):
@@ -325,4 +323,112 @@ def LStar_integrand_plot(mesh, model_title, r=7, th=0, LStar_kwargs={}):
               fontsize=20)
     plt.xlabel('Local time (radians about sun-earth line)', fontsize=20)
     plt.ylabel(r'$sin^2(\theta)$', fontsize=20)
+    
+
+def meridional_plot_of_current(mesh, model_title, xlim=DEFAULT_MSPHERE_XLIM,
+                               ylim=DEFAULT_MSPHERE_YLIM):
+    """Produces a series of plots visualizing the current indensity.
+
+    Args
+      mesh: grid and magnetic field, loaded using meshes module
+      model_title: Title of magnetic field model, used in title of plot
+    Returns
+      ax: matplotlib axes generated
+    """
+    mesh_curlB = mesh.compute_derivative(gradient=False, vorticity='curlB')
+    J = mesh_curlB['curlB'] * (units.G/constants.R_earth) / constants.mu0
+    mesh_curlB['J'] = J.to(units.nA / units.m**2).value
+    mesh_curlB['Jy'] = mesh_curlB['J'][:, 1]
+
+    # Current Density Strength
+    meridional_plot_of_intensity(
+        mesh_curlB, model_title, arr_name='J', norm=LogNorm(),
+        cbar_label='Current Density Strength ($nA/m^2$)'
+    )
+    plt.xlim(xlim)
+    plt.ylim(ylim)
+
+    return plt.gca()
+
+
+def equitorial_plot_of_current(
+        mesh, model_title, xlim=DEFAULT_MSPHERE_XLIM, ylim=DEFAULT_MSPHERE_YLIM):
+    """Produces a series of plots visualizing the current indensity.
+
+    Args
+      mesh: grid and magnetic field, loaded using meshes module
+      model_title: Title of magnetic field model, used in title of plot
+    Returns
+      ax: matplotlib axes generated
+    """
+    mesh_curlB = mesh.compute_derivative(gradient=False, vorticity='curlB')
+    J = mesh_curlB['curlB'] * (units.G/constants.R_earth) / constants.mu0
+    mesh_curlB['J'] = J.to(units.nA / units.m**2).value
+    mesh_curlB['Jy'] = mesh_curlB['J'][:, 1]
+    
+    equitorial_plot_of_intensity(
+        mesh_curlB, model_title, arr_name='J', norm=LogNorm(),
+        cbar_label='Current Density Strength ($nA/m^2$)'
+    )
+    plt.xlim(xlim)
+    plt.ylim(ylim)
+
+    return plt.gca()
+
+    # # Current Density Y-Component
+    # meridional_plot_of_intensity(
+    #     mesh_curlB, model_title, arr_name='Jy', norm=SymLogNorm(1e-2),
+    #     cmap='coolwarm', cbar_label='Current Density Y-Component ($nA/m^2$)'
+    # )
+    # plt.xlim(xlim)
+    # plt.ylim(ylim)
+
+    # equitorial_plot_of_intensity(
+    #     mesh_curlB, model_title, arr_name='Jy', norm=SymLogNorm(1e-2),
+    #     cmap='coolwarm', cbar_label='Current Density Y-Component ($nA/m^2$)'
+    # )
+    # plt.xlim(xlim)
+    # plt.ylim(ylim)
+
+
+def add_field_line_traces_meridional_plot(ax, mesh, Lshells=np.arange(4, 15)):
+    """Helper function to add field line traces to a meridional plot.
+    
+    Args
+      ax: Matplotlib axes, eg returned by meridional_plot_of_intensity() or
+        meridional_plot_of_current()
+      mesh: Mesh holding magnetic field to derive traces from
+      Lshells: array of which Lshells to draw traces for.
+    """
+    for L in Lshells:
+        for flip in [-1, 1]:        
+            try:
+                res = invariants.calculate_K(mesh, (flip * L, 0, 0), 7.5)
+            except invariants.FieldLineTraceReturnedEmpty as e:
+                continue
+            ax.plot(res.trace_points[:, 0], res.trace_points[:, 2], color='k')
+
+
+def add_field_isolines_to_equitorial_plot(ax, mesh, levels=7):
+    """Helper function to field isolines to a equitorial plot.
+
+    Isolines are plot at Bmax / level_num**3 to account for cubically-decreasing 
+    field strength.
+    
+    Args
+      ax: Matplotlib axes, eg returned by meridional_plot_of_intensity() or
+        meridional_plot_of_current()
+      mesh: Mesh holding magnetic field to derive isolines from
+      levels: number of levels
+    """
+    field = np.linalg.norm(mesh['B'], axis=1)
+    Xeq = utils.lfm_get_eq_slice(mesh.x)
+    Yeq = utils.lfm_get_eq_slice(mesh.y)
+    s = mesh.x.shape
+    F = np.reshape(field.ravel(), s, order='F')   # field
+    Feq = utils.lfm_get_eq_slice(F)
+    levels = Feq.max() / np.arange(1, levels + 1)**3
+    levels = sorted(levels)
+   
+    ax.contour(Xeq, Yeq, Feq, levels=levels, colors='black')
     
