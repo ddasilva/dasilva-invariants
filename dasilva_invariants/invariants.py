@@ -56,7 +56,7 @@ class FieldLineTraceReturnedEmpty(RuntimeError):
 class DriftShellBisectionDoesntConverge(RuntimeError):
     """Raised when Bisection to determine the drift shell doesn't converge."""
     
-    
+
 def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
                 step_size=None):
     """Calculate the K adiabatic invariant.
@@ -344,10 +344,14 @@ def _bisect_rvalue_by_K(mesh_tempfile, target_K, Bm, starting_rvalue, local_time
         )
         current_result = calculate_K(mesh, current_starting_point, Bm=Bm,
                                      step_size=step_size)
-        rel_error = (
-            abs(target_K - current_result.K) /
-            target_K
-        )
+
+        if target_K == 0 and current_result.K == 0:
+            rel_error = 0
+        else:
+            rel_error = (
+                abs(target_K - current_result.K) /
+                max(np.abs(target_K), np.abs(current_result.K))
+            )
         
         if rel_error < rel_error_threshold:
             # match found!
