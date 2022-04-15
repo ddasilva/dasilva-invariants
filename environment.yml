@@ -9,6 +9,7 @@ dependencies:
  - ipykernel
  - vtk
  - matplotlib
+ - pandas
  - pip
  - pip:
    - pyhdf
@@ -17,3 +18,5 @@ dependencies:
    - geopack
    - joblib
    - progressbar2
+   - line_profiler
+   - nbstripout
