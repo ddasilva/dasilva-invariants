@@ -9,14 +9,18 @@ dependencies:
  - ipykernel
  - vtk
  - matplotlib
+ - numba
  - pandas
+ - pyhdf
  - pip
  - pip:
-   - pyhdf
    - pyvista
    - ai.cs
+   - fortranformat
    - geopack
+   - ipdb
    - joblib
    - progressbar2
    - line_profiler
    - nbstripout
+   - pygeopack
