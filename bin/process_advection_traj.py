@@ -10,6 +10,7 @@ from dataclasses import dataclass, asdict
 import glob
 import itertools
 
+import fortranformat as ff
 import numpy as np
 from joblib import Parallel, delayed
 import pandas as pd
@@ -24,7 +25,8 @@ def main():
     parser.add_argument('run_name')
     parser.add_argument('traj_csv_path')
     parser.add_argument('n_jobs', type=int)
-    parser.add_argument('--particle-num', type=int, required=True)
+    parser.add_argument('--particle-num-start', type=int, required=True)
+    parser.add_argument('--particle-num-stop', type=int, required=True)
     parser.add_argument('--data_dir', default='/glade/scratch/danieldas/data')
     
     args = parser.parse_args()
@@ -37,52 +39,48 @@ def main():
     # Create parallel processing pool ----------------------------------------
     par = Parallel(n_jobs=args.n_jobs, backend='multiprocessing', verbose=5000)
 
-    # Loop through batches of and process in parallel ------------------------
-    batch_size = args.n_jobs    
+    # Loop through file of and process in parallel ------------------------
     fh = open(args.traj_csv_path)
-    results = []
-
-    processed_count = 0
+    tasks = []
     
-    for lines in iter_batch(fh, batch_size):
-        batch_tasks = []
-        early_exit = False
+    for line in fh:
+        row = TrajFileRow.parse_line(line)
         
-        for line in lines:
-            row = TrajFileRow.parse_line(line)
-
-            if row.particle_num < args.particle_num:
-                continue
-            if row.particle_num > args.particle_num:
-                early_exit = True
-                continue
-
-            hdf_path = hdf_paths[int(row.time)]
-            row_task = delayed(process_row)(row, hdf_path)
-            batch_tasks.append(row_task)
-
-        if not batch_tasks:
+        if row.particle_num < args.particle_num_start:
+            continue
+        if row.particle_num > args.particle_num_stop:
+            break
+        if int(row.time) % (60*5) != 0:
             continue
         
-        batch_results = par(batch_tasks)
-        results.extend(batch_results)
-
-        processed_count += len(batch_tasks)
-        print(f'==> Running total: processed {processed_count}')
-
-        if early_exit:
-            break
+        hdf_path = hdf_paths[int(row.time)]
+        row_task = delayed(process_row)(row, hdf_path)
+        tasks.append(row_task)
         
     fh.close()
-
+    results = par(tasks)
+        
     # Write CSV output to terminal and disk ----------------------------------
-    output_path = f'daSilva_P{args.particle_num}_'
+    #output_path = f'daSilva_P{args.particle_num:06d}_'
+    output_path = (f'daSilva_P{args.particle_num_start:06d}-'
+                   f'{args.particle_num_stop:06d}_')
     output_path += os.path.basename(args.traj_csv_path)
-    
-    df = pd.DataFrame(results)
-    print(df.to_string(index=0))
-    df.to_csv(output_path, sep=' ', na_rep='NaN', header=False, index=False)
+    fh = open(output_path, 'w')
+    df = pd.DataFrame(results).fillna(0)
 
+    print(df.to_string(index=0))
+    
+    writer = ff.FortranRecordWriter(
+        '(i8,f10.2,f9.5,f9.1,f9.5,f12.7,f6.2,f8.2,f9.5,e14.6)'
+    )
+
+    for _, row in df.iterrows():
+        line = writer.write(row.values.tolist())
+        fh.write(line)
+        fh.write('\n')
+
+    fh.close()
+        
     print(f'Wrote to {output_path}')
     
 
@@ -100,8 +98,8 @@ def process_row(row, hdf_path):
     """
     mesh = meshes.get_lfm_hdf4_data(hdf_path)
     output = asdict(row)
-    output['radial_dist_old'] = row.radial_dist
-    output['lfm_file'] = os.path.basename(hdf_path)
+    #output['radial_dist_old'] = row.radial_dist
+    #output['lfm_file'] = os.path.basename(hdf_path)
 
     starting_point = (
         row.radial_dist * np.cos(np.deg2rad(row.az_loc)),  # X
@@ -126,7 +124,7 @@ def process_row(row, hdf_path):
         output['radial_dist'] = result.LStar
 
     return output
-            
+   
 
 @dataclass
 class TrajFileRow:
@@ -169,25 +167,7 @@ class TrajFileRow:
             initial_energy=float(toks[8]),
             first_invariant=float(toks[9])
         )
-
     
-def iter_batch(iterable, batch_size):
-    """Iterate through batches of iterable.
-
-    Taken from https://stackoverflow.com/a/62913856
-
-    Args
-      iterable: some iterable object
-      batch_size: integer batch size (n)
-    Yields
-      batches of size <= n
-    """
-    iterator = iter(iterable)
-
-    while batch := list(itertools.islice(iterator, batch_size)):
-        yield batch
-
-
 
 if __name__ == '__main__':
     main()

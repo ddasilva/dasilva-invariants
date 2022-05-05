@@ -7,6 +7,7 @@ this project.
 In this module, all grids returned are in units of Re and all magnetic
 fields are in units of Gauss.
 """
+from ai import cs
 from astropy import constants, units
 from datetime import datetime
 from geopack import geopack, t96
@@ -125,30 +126,16 @@ def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
     Y_grid[:, 1:-1, :-1] = _calc_cell_centers(Y_grid_raw)
     Z_grid[:, 1:-1, :-1] = _calc_cell_centers(Z_grid_raw)
     
-    jAxis = 0
-    axisCoord = np.zeros(3)
-    xyz = np.zeros(3)    
-
     for j in range(0, njp2, njp1):
         jAxis = max(1, min(nj, j))
         for i in range(ni):
-            xyz[:] = 0
-            for k in range(nk):
-                xyz[:] += [X_grid[i, jAxis, k],
-                           Y_grid[i, jAxis, k],
-                           Z_grid[i, jAxis, k]]
+            X_grid[i, j, :] = X_grid[i, jAxis, :].mean()
+            Y_grid[i, j, :] = Y_grid[i, jAxis, :].mean()
+            Z_grid[i, j, :] = Z_grid[i, jAxis, :].mean()
 
-            xyz[0] /= nk
-            for k in range(nk):
-                X_grid[i, j, k] = xyz[0]
-                Y_grid[i, j, k] = xyz[1]
-                Z_grid[i, j, k] = xyz[2]
-
-    for j in range(njp2):
-        for i in range(ni):
-            X_grid[i, j, nk] = X_grid[i, j, 0]
-            Y_grid[i, j, nk] = Y_grid[i, j, 0]
-            Z_grid[i, j, nk] = Z_grid[i, j, 0]
+    X_grid[:, :, nk] = X_grid[:, :, 0]
+    Y_grid[:, :, nk] = Y_grid[:, :, 0]
+    Z_grid[:, :, nk] = Z_grid[:, :, 0]
 
     # Convert to units of earth radii (Re)
     # ------------------------------------------------------------------------
@@ -181,9 +168,41 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     By_raw = _fix_lfm_hdf4_array_order(hdf.select('by_').get())
     Bz_raw = _fix_lfm_hdf4_array_order(hdf.select('bz_').get())
 
-    # This code is Josh Murphy's point2CellCenteredVector() function converted
-    # to python.
+    Bx, By, Bz = _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw)
+
+    # Pre-compute spherical coordinates of grid
     # ------------------------------------------------------------------------
+    R_grid, Phi_grid, Theta_grid = cs.cart2sp(X_grid, Y_grid, Z_grid)
+    
+    # Create PyVista structured grid.
+    # ------------------------------------------------------------------------    
+    mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
+    
+    B = np.empty((mesh.n_points, 3))
+    B[:, 0] = Bx.flatten(order='F')
+    B[:, 1] = By.flatten(order='F')
+    B[:, 2] = Bz.flatten(order='F')
+    
+    mesh.point_data['B'] = B    
+    mesh.point_data['R_grid'] = R_grid.flatten(order='F')
+    mesh.point_data['Phi_grid'] = Phi_grid.flatten(order='F')
+    mesh.point_data['Theta_grid'] = Theta_grid.flatten(order='F')
+    
+    # Return output
+    return mesh
+
+
+def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
+    """Apply Josh Murphy's patch to the LFM grid.
+
+    This code is Josh Murphy's point2CellCenteredVector() function converted
+    to python.
+    
+    Args
+     Bx_raw, By_raw, Bz_raw: The magnetic field in the raw grid.
+    Returns
+     Bx, By, Bz: The magnetic field in the patched grid
+    """
     ni   = Bx_raw.shape[0] - 1
     nip1 = Bx_raw.shape[0]
     nip2 = Bx_raw.shape[0] + 1
@@ -200,51 +219,22 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     By = np.zeros((ni, njp2, nkp1))
     Bz = np.zeros((ni, njp2, nkp1))
 
-    offsetData = offsetCell = 0
-    tuple = np.zeros(3)
-
-    for k in range(nk):
-        for j in range(nj):
-            for i in range(ni):
-                Bx[i, j+1, k] = Bx_raw[i, j, k]            
-                By[i, j+1, k] = By_raw[i, j, k]
-                Bz[i, j+1, k] = Bz_raw[i, j, k]
-
-    tupleDbl = np.zeros(3)
+    Bx[:, 1:, :] = Bx_raw[:-1, :, :]
+    By[:, 1:, :] = By_raw[:-1, :, :]
+    Bz[:, 1:, :] = Bz_raw[:-1, :, :]
+    
     for j in range(0, njp2, njp1):
         jAxis = max(1, min(nj, j))
         for i in range(ni):
-            tuple[:] = 0
+            Bx[i, j, :] = Bx[i, jAxis, :].mean()
+            By[i, j, :] = Bz[i, jAxis, :].mean()
+            Bz[i, j, :] = Bz[i, jAxis, :].mean()
+                       
+    Bx[:, :, nk] = Bx[:, :, 0]
+    By[:, :, nk] = By[:, :, 0]
+    Bz[:, :, nk] = Bz[:, :, 0]
 
-            for k in range(nk):
-                tuple[:] += [Bx[i, jAxis, k],
-                             By[i, jAxis, k],
-                             Bz[i, jAxis, k]]
-            tuple /= nk
-
-            for k in range(nk):
-                Bx[i, j, k] = tuple[0]
-                By[i, j, k] = tuple[1]
-                Bz[i, j, k] = tuple[2]
-
-    for j in range(njp2):
-        for i in range(ni):
-            Bx[i, j, nk] = Bx[i, j, 0]
-            By[i, j, nk] = By[i, j, 0]
-            Bz[i, j, nk] = Bz[i, j, 0]
-            
-    # Create PyVista structured grid.
-    # ------------------------------------------------------------------------    
-    mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
-    
-    B = np.empty((mesh.n_points, 3))
-    B[:, 0] = Bx.flatten(order='F')
-    B[:, 1] = By.flatten(order='F')
-    B[:, 2] = Bz.flatten(order='F')
-    mesh.point_data['B'] = B    
-    
-    # Return output
-    return mesh
+    return Bx, By, Bz
 
               
 def _calc_cell_centers(A):

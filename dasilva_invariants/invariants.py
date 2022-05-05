@@ -15,6 +15,7 @@ from joblib import delayed, Parallel
 import numpy as np
 import pyvista
 from scipy import interpolate
+import vtk
 
 
 @dataclass
@@ -91,7 +92,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
         max_step_length = step_size
         min_step_length = step_size
         initial_step_length = step_size
-  
+        
     trace = mesh.streamlines(
         'B',
         start_position=starting_point,
@@ -205,32 +206,58 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         step_size=trace_step_size,
     )
     
-    # Estimate radius of equivalent K at other local times using bisection
+    # Estimate radius of equivalent K/Bm at other local times using bisection
     # method. The first element in the drift_rvalues array is not in the
     # loop because it is not done with bisection.
     # ------------------------------------------------------------------------
-    # Calculate each local time in parallel-- an embaressingly parallel 
-    # problem. Tasks is of size n_drift_times - 1, holds tasks for all but the
-    # first.
-    _, mesh_tempfile = tempfile.mkstemp(suffix='.vtk')
-    mesh.save(mesh_tempfile)   # avoid pickling meshes; instead pass filename
+    # Configure following code based on whether parallel processing is used
+    # For multirpocessing, avoid pickling (serialize with pyvsita), otherwise
+    # faster to just send reference to thread.
+    if n_jobs == 1:
+        mesh_kwargs = {'mesh': mesh}
+        parallel_processor = Parallel(
+            verbose=verbose, n_jobs=1, batch_size=1, backend='threading'
+        )        
+    else:
+        # avoid pickling meshes; instead pass filename        
+        _, mesh_tempfile = tempfile.mkstemp(suffix='.vtk')
+        mesh.save(mesh_tempfile)
+        mesh_kwargs = {'mesh_tempfile': mesh_tempfile}
+        parallel_processor = Parallel(
+            verbose=verbose, n_jobs=n_jobs, batch_size=1,
+            backend='multiprocessing'
+        )
 
+    # Create tasks -----------------------------------------------------------
     tasks = [] 
     
     for i, local_time in enumerate(drift_local_times):
         if i == 0:
             continue
 
-        task = delayed(_bisect_rvalue_by_K)(
-            mesh_tempfile, starting_result.K, starting_result.Bm,
-            starting_rvalue, local_time, starting_theta,
-            max_iters, rel_error_threshold, trace_step_size,
-        )
+        if starting_mirror_latitude == 0:
+            # Special case for equitorial mirroring particles-- only need
+            # to search for Bm
+            task = delayed(_search_rvalue_by_Bm)(
+                starting_result.Bm, starting_rvalue, local_time, max_iters,
+                rel_error_threshold, trace_step_size,                
+                **mesh_kwargs
+            )
+        else:            
+            task = delayed(_bisect_rvalue_by_K)(
+                starting_result.K, starting_result.Bm,
+                starting_rvalue, local_time, starting_theta,
+                max_iters, rel_error_threshold, trace_step_size,
+                **mesh_kwargs
+            )
+
         tasks.append(task)
 
-    parallel_results = Parallel(verbose=verbose, n_jobs=n_jobs, batch_size=1,
-                                backend='multiprocessing')(tasks)
-    os.remove(mesh_tempfile)
+    parallel_results = parallel_processor(tasks)
+
+    # Parallel processing cleanup --------------------------------------------
+    if n_jobs > 1:
+        os.remove(mesh_tempfile)
     
     # Extract parallel results into arrays which correspond in index to
     # drift_local_times
@@ -242,7 +269,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
 
     for i, parallel_result in enumerate(parallel_results):
         drift_rvalues[i + 1], drift_K_results[i + 1] = parallel_result
-        
+
     # Calculate L*
     # This method assumes a dipole below the innery boundary, and integrates
     # around the local times using stokes law with B = curl A. 
@@ -301,25 +328,16 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         integral_theta=integral_theta,
         integral_integrand=integral_integrand
     )
-    
 
-def _bisect_rvalue_by_K(mesh_tempfile, target_K, Bm, starting_rvalue, local_time,
-                        starting_theta, max_iters, rel_error_threshold,
-                        step_size):
-    """Internal helper function to calculate_LStar(). Applies bisection method
-    to find an radius with an equal K.
+
+def _search_rvalue_by_Bm(
+        target_Bm, starting_rvalue, local_time, max_iters, rel_error_threshold,
+        step_size, mesh=None, mesh_tempfile=None):
+    """Internal helper function to calculate_LStar(). Applies linear search method
+    to find an radius with an B(r) = Bm for equitorial mirroring particles. 
 
     Args
-      mesh_tempfile: path to grid and magnetic field, loaded using 
-        pyvsita
-      target_K: floating point K value to search for (float)
-      Bm: magnetic mirroring point; parameter used to estimte K (float)
-      starting_rvalue: starting point rvalue (float)
-      local_time: starting local time (radians, float)
-      starting_theta: starting latitude (radians, float)
-      max_iters: Maximum number of iterations before erroring out (int)
-      rel_error_threshold: Relative error threshold to consider two K's equal
-        (float between [0, 1]).
+
     Returns
       rvalue: radius at given local time which produces the same K on 
         the given mesh (float)
@@ -328,10 +346,86 @@ def _bisect_rvalue_by_K(mesh_tempfile, target_K, Bm, starting_rvalue, local_time
     Raises
       RuntimeError: maximum number of iterations reached
     """
-    # Perform bisection method. If you are not sure what this is, it is
-    # advised you read about bisection on wikipedia first.
+    # Perform bisection method searching for Bm(r)
     # ------------------------------------------------------------------------
-    mesh = pyvista.read(mesh_tempfile)
+    assert (mesh is not None) or (mesh_tempfile is not None), \
+        'One of mesh= or mesh_tempfile= is required'
+    
+    if mesh_tempfile:
+        mesh = pyvista.read(mesh_tempfile)
+
+    # Interpolate points 25% inside and 50% farther out the nominal rvalue
+    # and search for closest B
+    rvalues = np.arange(0.75 * starting_rvalue,
+                        1.25 * starting_rvalue,
+                        0.001 * starting_rvalue)
+    local_times = np.array([local_time] * rvalues.size)
+    latitudes = np.array([0] * rvalues.size)
+    
+    points_search = pyvista.PolyData(np.array(cs.sp2cart(
+        r=rvalues, phi=local_times, theta=latitudes
+    )).T)
+
+    interp = vtk.vtkPointInterpolator()  # uses linear interpolation by default
+    interp.SetInputData(points_search)
+    interp.SetSourceData(mesh)
+    interp.Update()
+
+    points_interp = pyvista.PolyData(interp.GetOutput())
+
+    # Search for closet point and return trace at that point
+    B_search = np.linalg.norm(points_interp['B'], axis=1)
+    i = np.argmin(np.abs(target_Bm - B_search))
+
+    rel_error = np.abs(B_search[i] - target_Bm) / target_Bm
+
+    if rel_error > rel_error_threshold:
+        raise DriftShellBisectionDoesntConverge('Could not find Bm!')
+
+    rvalue = np.linalg.norm(points_interp.points[i, :])    
+    result = calculate_K(mesh, points_interp.points[i, :], Bm=target_Bm,
+                         step_size=step_size)
+
+    return rvalue, result
+
+
+def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
+                        starting_theta, max_iters, rel_error_threshold,
+                        step_size, mesh=None, mesh_tempfile=None):
+    """Internal helper function to calculate_LStar(). Applies bisection method
+    to find an radius with an equal K.
+
+    Only one of mesh or mesh_tempfile is required. Use tempfiles for mutli-
+    processing, using direct reference (mesh) for threading.
+
+    Args
+      target_K: floating point K value to search for (float)
+      Bm: magnetic mirroring point; parameter used to estimte K (float)
+      starting_rvalue: starting point rvalue (float)
+      local_time: starting local time (radians, float)
+      starting_theta: starting latitude (radians, float)
+      max_iters: Maximum number of iterations before erroring out (int)
+      rel_error_threshold: Relative error threshold to consider two K's equal
+        (float between [0, 1]).
+      mesh: reference to grid and magnetic field
+      mesh_tempfile: path to grid and magnetic field, loaded using 
+        pyvsita
+    Returns
+      rvalue: radius at given local time which produces the same K on 
+        the given mesh (float)
+      calculate_k_result: instance of CalculateKResult corresponding to
+        radius and calculate_K().
+    Raises
+      RuntimeError: maximum number of iterations reached
+    """
+    # Perform bisection method searching for K(Bm, r)
+    # ------------------------------------------------------------------------
+    assert (mesh is not None) or (mesh_tempfile is not None), \
+        'One of mesh= or mesh_tempfile= is required'
+    
+    if mesh_tempfile:
+        mesh = pyvista.read(mesh_tempfile)
+
     upper_rvalue = starting_rvalue * 2
     lower_rvalue = np.linalg.norm(mesh.points, axis=1).min()
     current_rvalue = starting_rvalue
@@ -362,14 +456,12 @@ def _bisect_rvalue_by_K(mesh_tempfile, target_K, Bm, starting_rvalue, local_time
                                
             current_rvalue, lower_rvalue = \
                 ((upper_rvalue + current_rvalue) / 2, current_rvalue)
-            # print('Too Low!')
         else:
             # too high!
             rel_errors.append((rel_error, 'too_high', current_rvalue))
 
             current_rvalue, upper_rvalue = \
                 ((lower_rvalue + current_rvalue) / 2, current_rvalue)
-            # print('Too high!')
         
     # If the code reached this point, the maximum number of iterations
     # was exhausted.
