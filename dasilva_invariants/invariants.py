@@ -28,7 +28,7 @@ class CalculateKResult:
     Bm: float                          # magnetic mirror strength
     mirror_latitude: float             # MLAT at which particle mirrors
     starting_point: Tuple[float, float, float]
-    
+
     trace_points: np.array             # trace points
     trace_latitude: np.array           # trace latitude
     trace_field_strength: np.array     # field strenth along trace
@@ -49,21 +49,21 @@ class CalculateLStarResult:
     integral_theta: np.array           # integration theta variable
     integral_integrand: np.array       # integration integran
 
-    
+
 class FieldLineTraceReturnedEmpty(RuntimeError):
     """Raised when a field line trace is performed but the result is empty."""
 
-    
+
 class DriftShellBisectionDoesntConverge(RuntimeError):
     """Raised when Bisection to determine the drift shell doesn't converge."""
-    
+
 
 def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
                 step_size=None):
     """Calculate the K adiabatic invariant.
 
     Either mirror_latitude or Bm must be specified.
-    
+
     Arguments
       mesh: grid and magnetic field, loaded using meshes module
       starting_point: Starting point of the field line integration, as
@@ -92,7 +92,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
         max_step_length = step_size
         min_step_length = step_size
         initial_step_length = step_size
-        
+
     trace = mesh.streamlines(
         'B',
         start_position=starting_point,
@@ -107,27 +107,27 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
 
     if trace.n_points == 0:
         raise FieldLineTraceReturnedEmpty('Trace returned empty')
-    
+
     trace_field_strength = np.linalg.norm(trace['B'], axis=1)
 
     # Get the trace latitudes and Bm if not specified
     # ------------------------------------------------------------------------
-    _, trace_latitude, _  = cs.cart2sp(x=trace.points[:, 0],
-                                       y=trace.points[:, 1],
-                                       z=trace.points[:, 2])
+    _, trace_latitude, _ = cs.cart2sp(x=trace.points[:, 0],
+                                      y=trace.points[:, 1],
+                                      z=trace.points[:, 2])
     trace_sorter = np.argsort(trace_latitude)
 
     if Bm is None:
         Bm = np.interp(x=np.deg2rad(mirror_latitude),
                        xp=trace_latitude[trace_sorter],
                        fp=trace_field_strength[trace_sorter])
-        
+
     # Sort field line trace points
     # ------------------------------------------------------------------------
     trace_latitude_sorted = trace_latitude[trace_sorter]
     trace_points_sorted = trace.points[trace_sorter]
     trace_field_strength_sorted = trace_field_strength[trace_sorter]    
-    
+
     # Calculate Function Values
     # ------------------------------------------------------------------------    
     Bm_mask = (trace_field_strength_sorted < Bm)
@@ -148,7 +148,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
         Bm=Bm,
         mirror_latitude=mirror_latitude,
         starting_point=starting_point,
-        
+
         trace_points=trace_points_sorted,
         trace_latitude=trace_latitude_sorted,
         trace_field_strength=trace_field_strength_sorted,
@@ -205,7 +205,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         mesh, starting_point, mirror_latitude=starting_mirror_latitude,
         step_size=trace_step_size,
     )
-    
+
     # Estimate radius of equivalent K/Bm at other local times using bisection
     # method. The first element in the drift_rvalues array is not in the
     # loop because it is not done with bisection.
@@ -217,9 +217,9 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         mesh_kwargs = {'mesh': mesh}
         parallel_processor = Parallel(
             verbose=verbose, n_jobs=1, batch_size=1, backend='threading'
-        )        
+        )
     else:
-        # avoid pickling meshes; instead pass filename        
+        # avoid pickling meshes; instead pass filename
         _, mesh_tempfile = tempfile.mkstemp(suffix='.vtk')
         mesh.save(mesh_tempfile)
         mesh_kwargs = {'mesh_tempfile': mesh_tempfile}
@@ -229,8 +229,8 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         )
 
     # Create tasks -----------------------------------------------------------
-    tasks = [] 
-    
+    tasks = []
+
     for i, local_time in enumerate(drift_local_times):
         if i == 0:
             continue
@@ -240,10 +240,10 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
             # to search for Bm
             task = delayed(_search_rvalue_by_Bm)(
                 starting_result.Bm, starting_rvalue, local_time, max_iters,
-                rel_error_threshold, trace_step_size,                
+                rel_error_threshold, trace_step_size,
                 **mesh_kwargs
             )
-        else:            
+        else:
             task = delayed(_bisect_rvalue_by_K)(
                 starting_result.K, starting_result.Bm,
                 starting_rvalue, local_time, starting_theta,
@@ -258,7 +258,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     # Parallel processing cleanup --------------------------------------------
     if n_jobs > 1:
         os.remove(mesh_tempfile)
-    
+
     # Extract parallel results into arrays which correspond in index to
     # drift_local_times
     drift_rvalues = np.zeros_like(drift_local_times)
@@ -276,7 +276,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     # -----------------------------------------------------------------------
     inner_rvalue = np.linalg.norm(mesh.points, axis=1).min()
     surface_rvalue = 1
-    
+
     trace_north_latitudes = np.array(
         [result.trace_latitude.max() for result in drift_K_results],
         dtype=float
@@ -294,28 +294,28 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
 
         spline_y[:-1] = trace_north_latitudes
         spline_y[-1] = trace_north_latitudes[0]
-                       
+
         spline = interpolate.CubicSpline(spline_x, spline_y, bc_type='periodic')
 
         integral_axis = np.linspace(spline_x.min(),
                                     spline_x.max(),
                                     interp_npoints)
-        integral_theta = np.pi/2 - spline(integral_axis)  # colatitude        
+        integral_theta = np.pi/2 - spline(integral_axis)  # colatitude
     else:
         integral_axis = np.zeros(drift_local_times.size + 1)
         integral_axis[:-1] = drift_local_times
         integral_axis[-1] = integral_axis[0] + 2 * np.pi
-    
+
         integral_theta = np.zeros(drift_K_results.size + 1) 
         integral_theta[:-1] = np.pi/2 - trace_north_latitudes  # colatitude
         integral_theta[-1] = integral_theta[0]
 
     integral_integrand = np.sin(integral_theta)**2
-    integral = np.trapz(integral_integrand, integral_axis)   
+    integral = np.trapz(integral_integrand, integral_axis)
     LStar = 2 * np.pi * (inner_rvalue / surface_rvalue) / integral
-    
+
     # Return results
-    # ------------------------------------------------------------------------    
+    # ------------------------------------------------------------------------
     drift_K = np.array([result.K for result in drift_K_results], dtype=float)
 
     return CalculateLStarResult(
@@ -350,7 +350,7 @@ def _search_rvalue_by_Bm(
     # ------------------------------------------------------------------------
     assert (mesh is not None) or (mesh_tempfile is not None), \
         'One of mesh= or mesh_tempfile= is required'
-    
+
     if mesh_tempfile:
         mesh = pyvista.read(mesh_tempfile)
 
@@ -361,7 +361,7 @@ def _search_rvalue_by_Bm(
                         0.001 * starting_rvalue)
     local_times = np.array([local_time] * rvalues.size)
     latitudes = np.array([0] * rvalues.size)
-    
+
     points_search = pyvista.PolyData(np.array(cs.sp2cart(
         r=rvalues, phi=local_times, theta=latitudes
     )).T)
@@ -422,7 +422,7 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
     # ------------------------------------------------------------------------
     assert (mesh is not None) or (mesh_tempfile is not None), \
         'One of mesh= or mesh_tempfile= is required'
-    
+
     if mesh_tempfile:
         mesh = pyvista.read(mesh_tempfile)
 
@@ -430,7 +430,7 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
     lower_rvalue = np.linalg.norm(mesh.points, axis=1).min()
     current_rvalue = starting_rvalue
     rel_errors = []
-    
+
     for _ in range(max_iters):
         # print(lower_rvalue, upper_rvalue, current_rvalue)  
         current_starting_point = cs.sp2cart(
@@ -446,14 +446,14 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
                 abs(target_K - current_result.K) /
                 max(np.abs(target_K), np.abs(current_result.K))
             )
-        
+
         if rel_error < rel_error_threshold:
             # match found!
             return current_rvalue, current_result
         elif current_result.K < target_K:
             # too low!
             rel_errors.append((rel_error, 'too_low', current_rvalue))
-                               
+
             current_rvalue, lower_rvalue = \
                 ((upper_rvalue + current_rvalue) / 2, current_rvalue)
         else:
@@ -462,11 +462,11 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
 
             current_rvalue, upper_rvalue = \
                 ((lower_rvalue + current_rvalue) / 2, current_rvalue)
-        
+
     # If the code reached this point, the maximum number of iterations
     # was exhausted.
     # ------------------------------------------------------------------------
     raise DriftShellBisectionDoesntConverge(
         f'Maximum number of iterations {max_iters} reached for local time '
         f'{local_time:.1f} during bisection ' + repr(rel_errors)
-    )    
+    )
