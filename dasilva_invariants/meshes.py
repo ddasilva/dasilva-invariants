@@ -90,7 +90,7 @@ def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
 
     This code is adapted from Josh Murphy's GhostPy and converted to python
     (crudely).
-    
+
     Args
       lfm_hdf4_path: Path to LFM HDF4 file
     Returns
@@ -103,7 +103,7 @@ def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
     X_grid_raw = _fix_lfm_hdf4_array_order(hdf.select('X_grid').get())
     Y_grid_raw = _fix_lfm_hdf4_array_order(hdf.select('Y_grid').get())
     Z_grid_raw = _fix_lfm_hdf4_array_order(hdf.select('Z_grid').get())
-    
+
     # This code implements Josh Murphy's point2CellCenteredGrid() function
     # ------------------------------------------------------------------------
     ni   = X_grid_raw.shape[0] - 1
@@ -121,17 +121,17 @@ def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
     X_grid = np.zeros((ni, njp2, nkp1))
     Y_grid = np.zeros((ni, njp2, nkp1))
     Z_grid = np.zeros((ni, njp2, nkp1))
-    
+
     X_grid[:, 1:-1, :-1] = _calc_cell_centers(X_grid_raw)
     Y_grid[:, 1:-1, :-1] = _calc_cell_centers(Y_grid_raw)
     Z_grid[:, 1:-1, :-1] = _calc_cell_centers(Z_grid_raw)
-    
+
     for j in range(0, njp2, njp1):
         jAxis = max(1, min(nj, j))
         for i in range(ni):
-            X_grid[i, j, :] = X_grid[i, jAxis, :].mean()
-            Y_grid[i, j, :] = Y_grid[i, jAxis, :].mean()
-            Z_grid[i, j, :] = Z_grid[i, jAxis, :].mean()
+            X_grid[i, j, :-1] = X_grid[i, jAxis, :-1].mean()
+            Y_grid[i, j, :-1] = Y_grid[i, jAxis, :-1].mean()
+            Z_grid[i, j, :-1] = Z_grid[i, jAxis, :-1].mean()
 
     X_grid[:, :, nk] = X_grid[:, :, 0]
     Y_grid[:, :, nk] = Y_grid[:, :, 0]
@@ -159,7 +159,7 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
     X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
-    
+
     # Read LFM B values from HDF file 
     # ------------------------------------------------------------------------
     hdf = SD(lfm_hdf4_path, SDC.READ)
@@ -173,25 +173,25 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     # Pre-compute spherical coordinates of grid
     # ------------------------------------------------------------------------
     R_grid, Phi_grid, Theta_grid = cs.cart2sp(X_grid, Y_grid, Z_grid)
-    
+
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------    
     mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
-    
+
     B = np.empty((mesh.n_points, 3))
     B[:, 0] = Bx.flatten(order='F')
     B[:, 1] = By.flatten(order='F')
     B[:, 2] = Bz.flatten(order='F')
-    
-    mesh.point_data['B'] = B    
+
+    mesh.point_data['B'] = B
     mesh.point_data['R_grid'] = R_grid.flatten(order='F')
     mesh.point_data['Phi_grid'] = Phi_grid.flatten(order='F')
     mesh.point_data['Theta_grid'] = Theta_grid.flatten(order='F')
-    
+
     # Return output
     return mesh
 
-
+            
 def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
     """Apply Josh Murphy's patch to the LFM grid.
 
@@ -222,21 +222,21 @@ def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
     Bx[:, 1:, :] = Bx_raw[:-1, :, :]
     By[:, 1:, :] = By_raw[:-1, :, :]
     Bz[:, 1:, :] = Bz_raw[:-1, :, :]
-    
+
     for j in range(0, njp2, njp1):
         jAxis = max(1, min(nj, j))
         for i in range(ni):
-            Bx[i, j, :] = Bx[i, jAxis, :].mean()
-            By[i, j, :] = Bz[i, jAxis, :].mean()
-            Bz[i, j, :] = Bz[i, jAxis, :].mean()
-                       
+            Bx[i, j, :-1] = Bx[i, jAxis, :-1].mean()
+            By[i, j, :-1] = By[i, jAxis, :-1].mean()
+            Bz[i, j, :-1] = Bz[i, jAxis, :-1].mean()
+
     Bx[:, :, nk] = Bx[:, :, 0]
     By[:, :, nk] = By[:, :, 0]
     Bz[:, :, nk] = Bz[:, :, 0]
 
     return Bx, By, Bz
 
-              
+
 def _calc_cell_centers(A):
     """Calculates centers of cells on a 3D grid.
 
@@ -249,7 +249,7 @@ def _calc_cell_centers(A):
     s = A.shape
 
     centers = np.zeros((s[0]-1, s[1]-1, s[2]-1))
-    
+
     centers += A[:-1, :-1, :-1]  # i,   j,   k
 
     centers += A[1:, :-1, :-1]   # i+1, j,   k
@@ -259,14 +259,14 @@ def _calc_cell_centers(A):
     centers += A[1:, 1:, :-1]    # i+1, j+1, k
     centers += A[:-1, 1:, 1:]    # i,   j+1, k+1
     centers += A[1:, :-1, 1:]    # i+1, j,   k+1
-    
+
     centers += A[1:, 1:, 1:]     # i+1, j+1, k+1
 
     centers /= 8.0
 
     return centers
 
-   
+
 def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
                              lfm_hdf4_path, time=datetime(1970, 1, 1),
                              external_field_only=False, force_zero_tilt=True,
@@ -296,7 +296,7 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
     X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid = (
         _get_fixed_lfm_grid_centers(lfm_hdf4_path)
     )
-    
+
     x_re_sm = X_re_sm_grid.flatten(order='F')  # flat arrays, easier for later
     y_re_sm = Y_re_sm_grid.flatten(order='F')
     z_re_sm = Z_re_sm_grid.flatten(order='F')
@@ -310,10 +310,10 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
 
     if force_zero_tilt:
         dipole_tilt_t96 = 0.0
-    
+
     x_re_gsm, y_re_gsm, z_re_gsm = sm_to_gsm(x_re_sm, y_re_sm, z_re_sm,
                                              dipole_tilt_t96)
-    
+
     # Calculate the internal (dipole) and external (t96) fields using the
     # geopack module
     # ------------------------------------------------------------------------    
@@ -321,13 +321,13 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
     # verbosity settings specified by caller
     params = (dynamic_pressure, Dst, By_imf, Bz_imf, 0, 0, 0, 0, 0, 0)
     tasks = []
-        
+
     for i in range(x_re_gsm.shape[0]):
         task = delayed(_t96_parallel_helper)(
             i, params, x_re_gsm[i], y_re_gsm[i], z_re_gsm[i], dipole_tilt_t96
         )
         tasks.append(task)
-            
+
     results = Parallel(verbose=verbose, n_jobs=n_jobs,
                        backend='multiprocessing')(tasks)
 
@@ -351,13 +351,13 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------
     mesh = pyvista.StructuredGrid(X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid)
-    
+
     B = np.empty((mesh.n_points, 3))
     B[:, 0] = B_t96[0, :].to(units.G).value
     B[:, 1] = B_t96[1, :].to(units.G).value
     B[:, 2] = B_t96[2, :].to(units.G).value
     mesh.point_data['B'] = B
-    
+
     # Return output
     return mesh
 
