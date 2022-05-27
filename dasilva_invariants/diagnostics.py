@@ -223,7 +223,7 @@ def equitorial_plot_of_intensity(
     
 
 def meridional_plot_of_intensity(
-        mesh, model_title, arr_name='B', norm=LogNorm(vmin=1e-5, vmax=1e-3),
+        mesh, model_title, arr_name='B', norm=LogNorm(vmin=5e-5, vmax=1e-3),
         cmap='viridis', cbar_label='|B| (G)', xlim=DEFAULT_MSPHERE_XLIM,
         ylim=DEFAULT_MSPHERE_YLIM):
     """Plot meridional plot of scalar quantity or normed vector quantity.
@@ -255,7 +255,7 @@ def meridional_plot_of_intensity(
     plt.figure(figsize=(12, 7))
     plt.pcolor(Xmer, Zmer, Fmer, norm=norm, cmap=cmap)
                 
-    plt.title(f'{model_title}\nMeridional Slice', fontsize=18)    
+    plt.title(f'{model_title} - Meridional Slice', fontsize=18, fontweight='bold')    
     plt.xlabel('X SM (Re)', fontsize=16)
     plt.ylabel('Z SM (Re)', fontsize=16)
     plt.colorbar().set_label(cbar_label, fontsize=14)
@@ -325,8 +325,11 @@ def LStar_integrand_plot(mesh, model_title, r=7, th=0, LStar_kwargs={}):
     plt.ylabel(r'$sin^2(\theta)$', fontsize=20)
     
 
-def meridional_plot_of_current(mesh, model_title, xlim=DEFAULT_MSPHERE_XLIM,
-                               ylim=DEFAULT_MSPHERE_YLIM):
+def meridional_plot_of_current(
+    mesh, model_title, xlim=DEFAULT_MSPHERE_XLIM, ylim=DEFAULT_MSPHERE_YLIM,
+    compute_deriv_kwargs={},
+    cbar_label='Current Density Strength ($nA/m^2$)'
+):
     """Produces a series of plots visualizing the current indensity.
 
     Args
@@ -334,16 +337,18 @@ def meridional_plot_of_current(mesh, model_title, xlim=DEFAULT_MSPHERE_XLIM,
       model_title: Title of magnetic field model, used in title of plot
     Returns
       ax: matplotlib axes generated
-    """
-    mesh_curlB = mesh.compute_derivative(gradient=False, vorticity='curlB')
+    """    
+    mesh_curlB = mesh.compute_derivative(
+        'B', gradient=False, vorticity='curlB', **compute_deriv_kwargs
+    )
     J = mesh_curlB['curlB'] * (units.G/constants.R_earth) / constants.mu0
     mesh_curlB['J'] = J.to(units.nA / units.m**2).value
     mesh_curlB['Jy'] = mesh_curlB['J'][:, 1]
 
     # Current Density Strength
     meridional_plot_of_intensity(
-        mesh_curlB, model_title, arr_name='J', norm=Normalize(0, 15),
-        cbar_label='Current Density Strength ($nA/m^2$)'
+        mesh_curlB, model_title, arr_name='J', norm=Normalize(0, 20),
+        cbar_label=cbar_label,
     )
     plt.xlim(xlim)
     plt.ylim(ylim)
@@ -362,11 +367,11 @@ def equitorial_plot_of_current(
     Returns
       ax: matplotlib axes generated
     """
-    mesh_curlB = mesh.compute_derivative(gradient=False, vorticity='curlB')
+    mesh_curlB = mesh.compute_derivative('B', gradient=False, vorticity='curlB')
     J = mesh_curlB['curlB'] * (units.G/constants.R_earth) / constants.mu0
     mesh_curlB['J'] = J.to(units.nA / units.m**2).value
     mesh_curlB['Jy'] = mesh_curlB['J'][:, 1]
-    
+
     equitorial_plot_of_intensity(
         mesh_curlB, model_title, arr_name='J',
         norm=Normalize(0, 15),
