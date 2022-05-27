@@ -107,6 +107,10 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
 
     if trace.n_points == 0:
         raise FieldLineTraceReturnedEmpty('Trace returned empty')
+    if trace.n_points < 50:
+        raise FieldLineTraceReturnedEmpty(
+            f'Trace too small ({trace.n_points} points)'
+        )
 
     trace_field_strength = np.linalg.norm(trace['B'], axis=1)
 
@@ -126,21 +130,47 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
     # ------------------------------------------------------------------------
     trace_latitude_sorted = trace_latitude[trace_sorter]
     trace_points_sorted = trace.points[trace_sorter]
-    trace_field_strength_sorted = trace_field_strength[trace_sorter]    
+    trace_field_strength_sorted = trace_field_strength[trace_sorter]
+
+    _, unique_inds = np.unique(trace_latitude_sorted, return_index=True)
+    trace_latitude_sorted = trace_latitude_sorted[unique_inds]
+    trace_points_sorted = trace_points_sorted[unique_inds]
+    trace_field_strength_sorted = trace_field_strength_sorted[unique_inds]
+
+    # Find mask for deepest |B| Well
+    # ------------------------------------------------------------------------
+    Bm_mask = np.zeros(trace_field_strength_sorted.shape, dtype=bool)
+    istart = np.argmin(trace_field_strength_sorted)
+    ii = istart
+    while ii >= 0:
+        if trace_field_strength_sorted[ii] < Bm:
+            Bm_mask[ii] = True
+            ii -= 1
+        else:
+            break
+    istart = np.argmin(trace_field_strength_sorted)
+    while ii < Bm_mask.size:
+        if trace_field_strength_sorted[ii] < Bm:
+            Bm_mask[ii] = True
+            ii += 1
+        else:
+            break
+#    else:
+#        Bm_mask = (trace_field_strength_sorted < Bm)
 
     # Calculate Function Values
-    # ------------------------------------------------------------------------    
-    Bm_mask = (trace_field_strength_sorted < Bm)
-
+    # ------------------------------------------------------------------------
     ds_vec = np.diff(trace_points_sorted[Bm_mask], axis=0)
     ds_scalar = np.linalg.norm(ds_vec, axis=1)
 
     integral_axis_latitude = np.rad2deg(trace_latitude_sorted[Bm_mask])
     integral_axis = np.array([0] + np.cumsum(ds_scalar).tolist())
-    integral_integrand = (Bm - trace_field_strength_sorted[Bm_mask])**(0.5)
+    integral_integrand = np.sqrt(Bm - trace_field_strength_sorted[Bm_mask])
 
     K = np.trapz(integral_integrand, integral_axis)
 
+    #print(Bm_mask.sum(), K)
+    
     # Return results
     # ------------------------------------------------------------------------
     return CalculateKResult(
