@@ -59,7 +59,7 @@ class DriftShellBisectionDoesntConverge(RuntimeError):
 
 
 def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
-                step_size=None):
+                step_size=None, drift_shell_splitting=False):
     """Calculate the K adiabatic invariant.
 
     Either mirror_latitude or Bm must be specified.
@@ -70,6 +70,8 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
         (x, y, z) tuple of floats, in units of Re.
       mirror_latitude: Lattitude in degrees to use for the mirroring point
       Bm: magnetic field strength at mirroring point
+      drift_shell_splitting: Enable special routine to better handle drift
+        shell splitting, but has issues converging
     Returns
       result: instance of CalculateKResult
     """
@@ -139,24 +141,25 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
 
     # Find mask for deepest |B| Well
     # ------------------------------------------------------------------------
-    Bm_mask = np.zeros(trace_field_strength_sorted.shape, dtype=bool)
-    istart = np.argmin(trace_field_strength_sorted)
-    ii = istart
-    while ii >= 0:
-        if trace_field_strength_sorted[ii] < Bm:
-            Bm_mask[ii] = True
-            ii -= 1
-        else:
-            break
-    istart = np.argmin(trace_field_strength_sorted)
-    while ii < Bm_mask.size:
-        if trace_field_strength_sorted[ii] < Bm:
-            Bm_mask[ii] = True
-            ii += 1
-        else:
-            break
-#    else:
-#        Bm_mask = (trace_field_strength_sorted < Bm)
+    if drift_shell_splitting:
+        Bm_mask = np.zeros(trace_field_strength_sorted.shape, dtype=bool)
+        istart = np.argmin(trace_field_strength_sorted)
+        ii = istart
+        while ii >= 0:
+            if trace_field_strength_sorted[ii] < Bm:
+                Bm_mask[ii] = True
+                ii -= 1
+            else:
+                break
+        istart = np.argmin(trace_field_strength_sorted)
+        while ii < Bm_mask.size:
+            if trace_field_strength_sorted[ii] < Bm:
+                Bm_mask[ii] = True
+                ii += 1
+            else:
+                break
+    else:
+        Bm_mask = (trace_field_strength_sorted < Bm)
 
     # Calculate Function Values
     # ------------------------------------------------------------------------
@@ -170,7 +173,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
     K = np.trapz(integral_integrand, integral_axis)
 
     #print(Bm_mask.sum(), K)
-    
+
     # Return results
     # ------------------------------------------------------------------------
     return CalculateKResult(
@@ -189,11 +192,11 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
 
 
 def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
-                    num_local_times=12, interp_local_times=True,
-                    interp_npoints=1024, rel_error_threshold=0.03, n_jobs=-1,
+                    num_local_times=4, interp_local_times=True,
+                    interp_npoints=1024, rel_error_threshold=0.075,
                     max_iters=100, trace_step_size=None, verbose=1000):
     """Calculate the L* adiabatic invariant.
-   
+
     Args
       mesh: grid and magnetic field, loaded using meshes module
       starting_point: Starting point of the field line integration, as
@@ -207,11 +210,9 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         with cubic splines to allow for less local time calculation.
       interp_npoints: Number of points to use in interplation, only active
         if interp_local_times=True.
-      n_jobs: number of jobs to run in parallel (-1 for all cores). doesn't
-        parallelize that well.
-      rel_error_threshold: bisection search pararameter in [0, 1] (float)       
-      max_iters: maximum iterations befor erroring out (int)
-      trace_step_siz
+      rel_error_threshold: bisection search pararameter in [0, 1] (float)
+      max_iters: maximum iterations before erroring out (int)
+      trace_step_size: undocumented
       verbose: verbosity level, see joblib.Parallel for more info
     Returns
       result: instance of CalculateLStarResult
@@ -222,7 +223,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     drift_local_times = starting_phi + (
         2 * np.pi * np.arange(num_local_times) / num_local_times
     )
-    
+
     # Calculate K at the current local time.
     # ------------------------------------------------------------------------
     if verbose:
@@ -236,73 +237,48 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         step_size=trace_step_size,
     )
 
-    # Estimate radius of equivalent K/Bm at other local times using bisection
-    # method. The first element in the drift_rvalues array is not in the
-    # loop because it is not done with bisection.
+    # Estimate radius of equivalent K/Bm at other local times using method
+    # based on whether the particle is equitorial mirroring or not (if it is,
+    # a trace is not required and can be skipped).
     # ------------------------------------------------------------------------
-    # Configure following code based on whether parallel processing is used
-    # For multirpocessing, avoid pickling (serialize with pyvsita), otherwise
-    # faster to just send reference to thread.
-    if n_jobs == 1:
-        mesh_kwargs = {'mesh': mesh}
-        parallel_processor = Parallel(
-            verbose=verbose, n_jobs=1, batch_size=1, backend='threading'
-        )
-    else:
-        # avoid pickling meshes; instead pass filename
-        _, mesh_tempfile = tempfile.mkstemp(suffix='.vtk')
-        mesh.save(mesh_tempfile)
-        mesh_kwargs = {'mesh_tempfile': mesh_tempfile}
-        parallel_processor = Parallel(
-            verbose=verbose, n_jobs=n_jobs, batch_size=1,
-            backend='multiprocessing'
-        )
-
-    # Create tasks -----------------------------------------------------------
-    tasks = []
+    drift_shell_results = [(starting_rvalue, starting_result)]
 
     for i, local_time in enumerate(drift_local_times):
         if i == 0:
             continue
 
+        starting_rvalue, _ = drift_shell_results[-1]
+
         if starting_mirror_latitude == 0:
             # Special case for equitorial mirroring particles-- only need
             # to search for Bm
-            task = delayed(_search_rvalue_by_Bm)(
+            result = _search_rvalue_by_Bm(
                 starting_result.Bm, starting_rvalue, local_time, max_iters,
                 rel_error_threshold, trace_step_size,
-                **mesh_kwargs
+                mesh=mesh
             )
+
         else:
-            task = delayed(_bisect_rvalue_by_K)(
+            result = _bisect_rvalue_by_K(
                 starting_result.K, starting_result.Bm,
                 starting_rvalue, local_time, starting_theta,
                 max_iters, rel_error_threshold, trace_step_size,
-                **mesh_kwargs
+                mesh=mesh
             )
 
-        tasks.append(task)
+        drift_shell_results.append(result)
 
-    parallel_results = parallel_processor(tasks)
-
-    # Parallel processing cleanup --------------------------------------------
-    if n_jobs > 1:
-        os.remove(mesh_tempfile)
-
-    # Extract parallel results into arrays which correspond in index to
+    # Extract drift shell results into arrays which correspond in index to
     # drift_local_times
     drift_rvalues = np.zeros_like(drift_local_times)
     drift_K_results = np.zeros_like(drift_local_times, dtype=object)
 
-    drift_rvalues[0] = starting_rvalue
-    drift_K_results[0] = starting_result
-
-    for i, parallel_result in enumerate(parallel_results):
-        drift_rvalues[i + 1], drift_K_results[i + 1] = parallel_result
+    for i, result in enumerate(drift_shell_results):
+        drift_rvalues[i], drift_K_results[i] = result
 
     # Calculate L*
     # This method assumes a dipole below the innery boundary, and integrates
-    # around the local times using stokes law with B = curl A. 
+    # around the local times using stokes law with B = curl A.
     # -----------------------------------------------------------------------
     inner_rvalue = np.linalg.norm(mesh.points, axis=1).min()
     surface_rvalue = 1
@@ -336,7 +312,7 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         integral_axis[:-1] = drift_local_times
         integral_axis[-1] = integral_axis[0] + 2 * np.pi
 
-        integral_theta = np.zeros(drift_K_results.size + 1) 
+        integral_theta = np.zeros(drift_K_results.size + 1)
         integral_theta[:-1] = np.pi/2 - trace_north_latitudes  # colatitude
         integral_theta[-1] = integral_theta[0]
 

@@ -9,7 +9,7 @@ fields are in units of Gauss.
 """
 from ai import cs
 from astropy import constants, units
-from datetime import datetime
+from datetime import datetime, timedelta
 from geopack import geopack, t96, t04
 from joblib import Parallel, delayed
 from matplotlib.dates import date2num
@@ -76,6 +76,8 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------
     mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
+
+    _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid)
 
     B = np.empty((mesh.n_points, 3))
     B[:, 0] = Bx.to(units.G).value
@@ -171,27 +173,36 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     Bz_raw = _fix_lfm_hdf4_array_order(hdf.select('bz_').get())
 
     Bx, By, Bz = _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw)
-
-    # Pre-compute spherical coordinates of grid
-    # ------------------------------------------------------------------------
-    R_grid, Phi_grid, Theta_grid = cs.cart2sp(X_grid, Y_grid, Z_grid)
-
+    
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------
     mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
-
+    
+    _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid)
+    
     B = np.empty((mesh.n_points, 3))
     B[:, 0] = Bx.flatten(order='F')
     B[:, 1] = By.flatten(order='F')
     B[:, 2] = Bz.flatten(order='F')
 
     mesh.point_data['B'] = B
+        
+    return mesh
+
+
+def _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid):
+    """Add pre-compute spherical coordinates of grid to mesh in place.
+    
+    Args
+      mesh: Mesh to add to
+      X_grid: three-dimensional grid of X coordinates
+      Y_grid: three-dimensional grid of Y coordinates
+      Z_grid: three-dimensional grid of Z coordinates
+    """
+    R_grid, Theta_grid, Phi_grid = cs.cart2sp(X_grid, Y_grid, Z_grid)
     mesh.point_data['R_grid'] = R_grid.flatten(order='F')
     mesh.point_data['Phi_grid'] = Phi_grid.flatten(order='F')
     mesh.point_data['Theta_grid'] = Theta_grid.flatten(order='F')
-
-    # Return output
-    return mesh
 
 
 def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
@@ -271,7 +282,7 @@ def _calc_cell_centers(A):
 
 def _get_tsyganenko_on_lfm_grid(
     model_name, params, lfm_hdf4_path, time=datetime(1970, 1, 1),
-    external_field_only=False, force_zero_tilt=True, n_jobs=-1, verbose=1000
+    external_field_only=False, force_zero_tilt=False, n_jobs=-1, verbose=1000
 ):
     """Internal helper function to get one of the tsyganenko fields on an LFM grid.
 
@@ -317,10 +328,11 @@ def _get_tsyganenko_on_lfm_grid(
     # Use joblib to process in parallel using the number of processes and
     # verbosity settings specified by caller
     tasks = []
-
+    
     for i in range(x_re_gsm.shape[0]):
         task = delayed(_tsyganenko_parallel_helper)(
-            model_name, i, params, x_re_gsm[i], y_re_gsm[i], z_re_gsm[i], dipole_tilt
+            model_name, i, params, x_re_gsm[i], y_re_gsm[i], z_re_gsm[i],
+            dipole_tilt
         )
         tasks.append(task)
 
@@ -351,6 +363,10 @@ def _get_tsyganenko_on_lfm_grid(
     # ------------------------------------------------------------------------
     mesh = pyvista.StructuredGrid(X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid)
 
+    _add_spherical_coords_to_mesh(
+        mesh, X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid
+    )
+    
     B = np.empty((mesh.n_points, 3))
     B[:, 0] = B_t[0, :].to(units.G).value
     B[:, 1] = B_t[1, :].to(units.G).value
@@ -372,7 +388,7 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
       Dst: Disturbance storm time index; parameter of T96 model
       By_imf: Y component of IMF Field (nT); parameter of T96 Model
       Bz_imf: Z component of IMF Field (nT); parameter of T96 Model
-      lfm_hdf4_path: Path to LFM hdf4 file      
+      lfm_hdf4_path: Path to LFM hdf4 file
       time: Time for T89 model, sets parameters
       external_field_only: Set to True to not include the internal (dipole) model
       force_zero_tilt: Force a zero tilt when calculating the file
@@ -387,20 +403,20 @@ def get_t96_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf,
     return _get_tsyganenko_on_lfm_grid('T96', params, lfm_hdf4_path, **kwargs)
 
 
-def get_tsyganenko_on_lfm_grid_with_auto_params(model_name, time, lfm_hdf4_path,
-                                                tell_params=True, __T_AUTO_DL_CACHE={},
-                                                **kwargs):
-    """Get a T96 field on a LFM grid. Uses an LFM HDF4 file to obtain
+def get_tsyganenko_on_lfm_grid_with_auto_params(
+    model_name, time, lfm_hdf4_path, tell_params=True,
+    path='http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip',
+    __T_AUTO_DL_CACHE={}, **kwargs
+):
+    """Get a Tsyganenko field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
     Args
-      dynamic_pressure: Dynamic Pressure of Solar Wind (nPA); parameter of
-        T96 Model
-      Dst: Disturbance storm time index; parameter of T96 model
-      By_imf: Y component of IMF Field (nT); parameter of T96 Model
-      Bz_imf: Z component of IMF Field (nT); parameter of T96 Model
-      lfm_hdf4_path: Path to LFM hdf4 file      
-      time: Time for T89 model, sets parameters
+      model_name: String name of model (T96 or T04)
+      time: Time for model, sets auto omni paramteters
+      lfm_hdf4_path: Path to LFM HDF4 file to set grid.
+      tell_params: Print OMNI paramteters retreived to standard output
+      path: Path to OMNI records file, can be URL to download.
       external_field_only: Set to True to not include the internal (dipole) model
       force_zero_tilt: Force a zero tilt when calculating the file
       n_jobs: Number of parallel processes to use (-1 for all available cores)
@@ -410,39 +426,32 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(model_name, time, lfm_hdf4_path,
         field values. Grid is in units of Re and magnetic field is is units of
         Gauss.
     """
-    # Lookup data from internet ------------------------------------------------------------
-    year = '%4d' % time.year
-    month = '%02d' % time.month
-    day = '%02d' % time.day
-
-    url = (
-        f'https://rbsp-ect.newmexicoconsortium.org/data_pub/QinDenton/{year}/'
-        f'QinDenton_{year}{month}{day}_5min.txt'
-    )
-
-    if url in __T_AUTO_DL_CACHE:
+    # Lookup data from  -----------------------------------------------
+    if path in __T_AUTO_DL_CACHE:
         if tell_params:
-            print(f'Getting {url} from cache')
-        df = __T_AUTO_DL_CACHE[url]
+            print(f'Getting {path} from cache')
+        df = __T_AUTO_DL_CACHE[path]
     else:
         if tell_params:
-            print(f'Downloading {url}')
-        col_names = [
-            'DateTime', 'Year', 'Month', 'Day', 'Hour', 'Minute', 'Second',
-            'ByIMF', 'BzIMF', 'Vsw', 'Den_P', 'Pdyn', 
-            'G1', 'G2', 'G3',
-            'ByIMF_status', 'BzIMF_status', 'Vsw_status', 'Den_P_status', 'Pdyn_status',
-            'G1_status', 'G2_status', 'G3_status',
-            'Kp', 'akp3', 'Dst',
-            'Bz1', 'Bz2', 'Bz3', 'Bz4', 'Bz5', 'Bz6', 
-            'W1', 'W2', 'W3', 'W4', 'W5', 'W6', 
-            'W1_status', 'W2_status', 'W3_status', 'W4_status', 'W5_status', 'W6_status', 
-        ]
-        df = pd.read_csv(url, index_col=False, names=col_names, sep='\s+', comment='#')
-        __T_AUTO_DL_CACHE[url] = df
+            print(f'Loading {path}')
+        df = pd.read_csv(path, index_col=False, sep='\s+', skiprows=1, names=[
+           'Year', 'Day', 'Hr', 'ByIMF', 'BzIMF', 'V_SW', 'Den_P', 'Pdyn',
+           'G1', 'G2', 'G3', '8_status', 'kp', 'akp3', 'dst',
+           'Bz1', 'Bz2', 'Bz3', 'Bz4', 'Bz5', 'Bz6',
+           'W1', 'W2', 'W3', 'W4', 'W5', 'W6', '6_stat',
+        ])
+        __T_AUTO_DL_CACHE[path] = df
+
+    mask = (df.Year > (time.year - 1)) & (df.Year < (time.year + 1))
+    df = df[mask]
+    df['DateTime'] = [
+        datetime(int(row.Year), 1, 1) +
+        timedelta(days=row.Day - 1, hours=row.Hr)
+        for _, row in df.iterrows()
+    ]
 
     # Interpolate Tsyganenko parameters (some may be unused)
-    cols = ['Pdyn', 'Dst', 'ByIMF', 'BzIMF', 'W1', 'W2', 'W3', 'W4', 'W5', 'W6']
+    cols = ['Pdyn', 'dst', 'ByIMF', 'BzIMF', 'W1', 'W2', 'W3', 'W4', 'W5', 'W6']
     params_dict = {}
 
     for col in cols:
@@ -455,7 +464,7 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(model_name, time, lfm_hdf4_path,
 
     if model_name == 'T96':
         for i in range(6):                   # set last six elements to zero
-            params[len(params)- 1 - i] = 0
+            params[len(params) - 1 - i] = 0
 
     # Call model using parameters
     return _get_tsyganenko_on_lfm_grid(model_name, params, lfm_hdf4_path, **kwargs)
@@ -472,9 +481,8 @@ def get_t04_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf, W_values,
       Dst: Disturbance storm time index; parameter of T96 model
       By_imf: Y component of IMF Field (nT); parameter of T96 Model
       Bz_imf: Z component of IMF Field (nT); parameter of T96 Model
-      W_values: Tuple of 6 W values as defined by model. They can be obtained from 
-      https://rbsp-ect.newmexicoconsortium.org/data_pub/QinDenton/2013/
-      lfm_hdf4_path: Path to LFM hdf4 file      
+      W_values: Tuple of 6 W values as defined by model.
+      lfm_hdf4_path: Path to LFM hdf4 file
       time: Time for T89 model, sets parameters
       external_field_only: Set to True to not include the internal (dipole) model
       force_zero_tilt: Force a zero tilt when calculating the file
@@ -492,7 +500,7 @@ def get_t04_mesh_on_lfm_grid(dynamic_pressure, Dst, By_imf, Bz_imf, W_values,
     return _get_tsyganenko_on_lfm_grid('T04', params, lfm_hdf4_path, **kwargs)
 
 
-def _tsyganenko_parallel_helper(model_name, i, params, x_re_gsm, y_re_gsm, 
+def _tsyganenko_parallel_helper(model_name, i, params, x_re_gsm, y_re_gsm,
                                 z_re_gsm, dipole_tilt):
     internal_field_vec = geopack.dip(x_re_gsm, y_re_gsm, z_re_gsm)
 
@@ -502,7 +510,7 @@ def _tsyganenko_parallel_helper(model_name, i, params, x_re_gsm, y_re_gsm,
         tsyganenko_func = t04.t04
     else:
         raise RuntimeError(f"Unknown tsyganenko model {model_name}")
-    
+
     external_field_vec = tsyganenko_func(
         params, dipole_tilt, x_re_gsm, y_re_gsm, z_re_gsm
     )

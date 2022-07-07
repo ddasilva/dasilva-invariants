@@ -9,14 +9,15 @@ from astropy import constants, units
 from matplotlib.colors import LogNorm, Normalize
 import pylab as plt
 import numpy as np
+import seaborn as sns
 
 from . import utils
 
 
 # Default limits of the magnetosphere cut plots (equitorial and meridional).
 # Note that the "X" and "Y" here are the axis of the matplotlib plot, not SM.
-DEFAULT_MSPHERE_XLIM = (15, -20)
-DEFAULT_MSPHERE_YLIM = (-20, 20)
+DEFAULT_MSPHERE_XLIM = (15, -15)
+DEFAULT_MSPHERE_YLIM = (-11.5, 11.5)
 
 
 def do_all(mesh, model_title):
@@ -40,7 +41,7 @@ def do_all(mesh, model_title):
     for func in funcs:
         func(mesh, model_title)
 
-    
+
 def tail_traces(mesh, model_title, th=180, r_min=3, r_max=9):
     """Visualizes traces in the magnetotail in the X/Z plane.
 
@@ -161,13 +162,13 @@ def dayside_field_intensities(mesh, model_title, th=0, r_min=3, r_max=7):
     plt.figure(figsize=(9, 6))
     rs = np.arange(r_min, r_max + 1)
     cmap = plt.get_cmap('viridis')
-    
+
     for i, r in enumerate(rs):
         x, y = np.cos(np.deg2rad(th)) * r, np.sin(np.deg2rad(th)) * r
         result = invariants.calculate_K(mesh, (x, y, 0), 7.5, step_size=None)
         rel_position = np.arange(result.trace_latitude.size, dtype=float)
         rel_position /= result.trace_latitude.size
-        
+
         plt.plot(rel_position, result.trace_field_strength, ',-',
                  label=f'r={r}', color=cmap(i/rs.size))
 
@@ -186,7 +187,7 @@ def equitorial_plot_of_intensity(
         cmap='viridis', cbar_label='|B| (G)', xlim=DEFAULT_MSPHERE_XLIM,
         ylim=DEFAULT_MSPHERE_YLIM):
     """Plot equitorial plot of scalar quantity or normed vector quantity.
-    
+
     Args
       mesh: grid and magnetic field, loaded using meshes module
       model_title: Title of magnetic field model, used in title of plot
@@ -326,29 +327,35 @@ def LStar_integrand_plot(mesh, model_title, r=7, th=0, LStar_kwargs={}):
     
 
 def meridional_plot_of_current(
-    mesh, model_title, xlim=DEFAULT_MSPHERE_XLIM, ylim=DEFAULT_MSPHERE_YLIM,
-    compute_deriv_kwargs={},
-    cbar_label='Current Density Strength ($nA/m^2$)'
+    mesh, model_title, empty_theta_region_threshold=2, xlim=DEFAULT_MSPHERE_XLIM,
+    ylim=DEFAULT_MSPHERE_YLIM, cmap=sns.color_palette("mako", as_cmap=True),
+    cbar_label='Current Density ($nA/m^2$)',
 ):
     """Produces a series of plots visualizing the current indensity.
 
     Args
       mesh: grid and magnetic field, loaded using meshes module
       model_title: Title of magnetic field model, used in title of plot
+      empty_theta_region_threshold: Display points with theta < this number of
+        degrees as empty, to avoid displaying points with grid artifacts. May
+        be None.
     Returns
       ax: matplotlib axes generated
     """    
-    mesh_curlB = mesh.compute_derivative(
-        'B', gradient=False, vorticity='curlB', **compute_deriv_kwargs
-    )
+    mesh_curlB = mesh.compute_derivative('B', gradient=False, vorticity='curlB')
     J = mesh_curlB['curlB'] * (units.G/constants.R_earth) / constants.mu0
     mesh_curlB['J'] = J.to(units.nA / units.m**2).value
     mesh_curlB['Jy'] = mesh_curlB['J'][:, 1]
 
+    if empty_theta_region_threshold is not None:
+        theta_grid_deg = np.rad2deg(mesh['Theta_grid'])
+        mask = (np.abs(theta_grid_deg) < empty_theta_region_threshold)
+        mesh_curlB['J'][mask] = np.nan
+
     # Current Density Strength
     meridional_plot_of_intensity(
-        mesh_curlB, model_title, arr_name='J', norm=Normalize(0, 20),
-        cbar_label=cbar_label,
+        mesh_curlB, model_title, arr_name='J', norm=LogNorm(1, 500),
+        cbar_label=cbar_label, cmap=cmap,
     )
     plt.xlim(xlim)
     plt.ylim(ylim)
@@ -383,38 +390,47 @@ def equitorial_plot_of_current(
     return plt.gca()
 
 
-def add_field_line_traces_meridional_plot(ax, mesh, lshells=np.arange(4, 9)):
+def add_field_line_traces_meridional_plot(
+    ax, mesh, lshells=np.arange(4, 9), color='black'
+):
     """Helper function to add field line traces to a meridional plot.
-    
+
     Args
       ax: Matplotlib axes, eg returned by meridional_plot_of_intensity() or
         meridional_plot_of_current()
       mesh: Mesh holding magnetic field to derive traces from
       lshells: sets magnetic latitudes of starting points of field line traces.
         magnetic latitude corresponds to field line with this lshell in dipole
+      color: Color of lines
     """
     inner_rvalue = 1.05 * np.linalg.norm(mesh.points, axis=1).min()
     mlats = np.arccos(np.sqrt(inner_rvalue / lshells))
-    
+
     for mlat in mlats:
         for flip in [-1, 1]:
-            x = inner_rvalue *  np.cos(mlat) * flip
+            x = inner_rvalue * np.cos(mlat) * flip
             y = 0
-            z  = inner_rvalue * np.sin(mlat)
-            
+            z = inner_rvalue * np.sin(mlat)
+
             try:
                 res = invariants.calculate_K(mesh, (x, y, z), 7.5)
             except invariants.FieldLineTraceReturnedEmpty:
                 continue
-            ax.plot(res.trace_points[:, 0], res.trace_points[:, 2], color='k')
 
-            
+            # Skip broken traces: these tend to jump around too far
+            ds_vec = np.diff(res.trace_points, axis=0)
+            ds_scalar = np.linalg.norm(ds_vec, axis=1)
+
+            if not np.any(ds_scalar > 0.1):
+                ax.plot(res.trace_points[:, 0], res.trace_points[:, 2], color=color)
+
+
 def add_field_isolines_to_equitorial_plot(ax, mesh, levels=20):
     """Helper function to field isolines to a equitorial plot.
 
     Isolines are plot at Bmax / level_num**3 to account for cubically-
     decreasing field strength.
-    
+
     Args
       ax: Matplotlib axes, eg returned by meridional_plot_of_intensity() or
         meridional_plot_of_current()

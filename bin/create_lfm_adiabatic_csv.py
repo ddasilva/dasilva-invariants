@@ -29,7 +29,7 @@ def process_hdf_path(hdf_path, radii, mirror_lats):
     output = {
         'filename': os.path.basename(hdf_path)
     }
-    
+
     for radius in radii:
         for mirror_lat in mirror_lats:
             starting_point = (-radius, 0, 0)
@@ -49,25 +49,23 @@ def process_hdf_path(hdf_path, radii, mirror_lats):
             else:
                 output[key] = result.K
 
-
             # Calcualte Lstar adiabatic invariant ----------------------------
             key = 'LStar_radius=%.2f:mirror_lat=%.2f' % (radius, mirror_lat)
 
             try:
                 result = invariants.calculate_LStar(
-                    mesh, starting_point, mirror_lat,
-                    num_local_times=10, verbose=False, n_jobs=1,
+                    mesh, starting_point, mirror_lat, verbose=False,
                 )
             except invariants.FieldLineTraceReturnedEmpty:
                 result = None
             except invariants.DriftShellBisectionDoesntConverge:
                 result = None
-            
+
             if result is None:
                 output[key] = np.nan
             else:
                 output[key] = result.LStar
-                
+
     return output
 
 
@@ -80,24 +78,25 @@ def main():
     parser.add_argument('--data_dir', default='/glade/scratch/danieldas/data')
     parser.add_argument('--radii', type=str, default='4,6,8')
     parser.add_argument('--mirror-lat', type=str, default='15,30')
-        
+
     args = parser.parse_args()
 
     radii = [float(val) for val in args.radii.split(',')]
     mirror_lats = [float(val) for val in args.mirror_lat.split(',')]
-    
+
     # Lookup list of model output (one file per timestep) -------------------
     hdf_dir = f'{args.data_dir}/{args.run_name}/*mhd*.hdf'
     hdf_paths = glob.glob(hdf_dir)
     hdf_paths.sort()
-    
+
     # Create joblib tasks and process in parallel ---------------------------
     tasks = []
-    
+
     for hdf_path in hdf_paths:
         tasks.append(delayed(process_hdf_path)(hdf_path, radii, mirror_lats))
 
     par = Parallel(n_jobs=args.n_jobs, backend='multiprocessing', verbose=50000)
+    print(f'Total of {len(tasks)//10} tasks')
     outputs = par(tasks[::10])
 
     # Write output -----------------------------------------------------------
@@ -107,6 +106,6 @@ def main():
 
     print(f'Wrote to {output_file}')
 
-    
+
 if __name__ == '__main__':
     main()
