@@ -3,6 +3,7 @@ channels:
  - conda-forge
 dependencies:
  - python=3
+ - cxx-compiler
  - numpy
  - scipy
  - astropy
@@ -12,15 +13,15 @@ dependencies:
  - numba
  - pandas
  - pyhdf
+ - seaborn
  - pip
  - pip:
    - pyvista
    - ai.cs
    - fortranformat
-   - geopack
+   - h5py
    - ipdb
    - joblib
    - progressbar2
    - line_profiler
    - nbstripout
-   - pygeopack

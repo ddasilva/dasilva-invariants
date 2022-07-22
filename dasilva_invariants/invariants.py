@@ -6,12 +6,9 @@ The following methods are key:
 """
 
 from dataclasses import dataclass
-import os
-import tempfile
 from typing import Tuple
 
 from ai import cs
-from joblib import delayed, Parallel
 import numpy as np
 import pyvista
 from scipy import interpolate
@@ -24,8 +21,8 @@ class CalculateKResult:
 
     All arrays are sorted by magnetic latitude.
     """
-    K: float                           # Second invariant
-    Bm: float                          # magnetic mirror strength
+    K: float                           # Second adiabatic invariant (K)
+    Bm: float                          # magnetic mirror strength used
     mirror_latitude: float             # MLAT at which particle mirrors
     starting_point: Tuple[float, float, float]
 
@@ -50,19 +47,32 @@ class CalculateLStarResult:
     integral_integrand: np.array       # integration integran
 
 
-class FieldLineTraceReturnedEmpty(RuntimeError):
-    """Raised when a field line trace is performed but the result is empty."""
+class FieldLineTraceInsufficient(RuntimeError):
+    """Raised when a field line trace is performed but the result is empty or
+    is too small."""
 
 
-class DriftShellBisectionDoesntConverge(RuntimeError):
-    """Raised when Bisection to determine the drift shell doesn't converge."""
+class DriftShellSearchDoesntConverge(RuntimeError):
+    """Raised when search to determine drift shell doesn't converge"""
 
 
-def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
-                step_size=None, drift_shell_splitting=False):
+class DriftShellLinearSearchDoesntConverge(DriftShellSearchDoesntConverge):
+    """Raised when linear search to determine the drift shell doesn't
+    converge."""
+
+
+class DriftShellBisectionDoesntConverge(DriftShellSearchDoesntConverge):
+    """Raised when bisection serach to determine the drift shell doesn't
+    converge."""
+
+
+def calculate_K(
+    mesh, starting_point, mirror_latitude=None, Bm=None, pitch_angle=None,
+    step_size=None
+):
     """Calculate the K adiabatic invariant.
 
-    Either mirror_latitude or Bm must be specified.
+    Either mirror_latitude, Bm, or pitch_angle must be specified.
 
     Arguments
       mesh: grid and magnetic field, loaded using meshes module
@@ -70,19 +80,27 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
         (x, y, z) tuple of floats, in units of Re.
       mirror_latitude: Lattitude in degrees to use for the mirroring point
       Bm: magnetic field strength at mirroring point
-      drift_shell_splitting: Enable special routine to better handle drift
-        shell splitting, but has issues converging
+      pitch_angle: pitch angle in degrees
     Returns
       result: instance of CalculateKResult
+    Raises
+      FieldLineTraceInsufficient: field line trace empty or too small
     """
     # Validate function arguments
     # ------------------------------------------------------------------------
-    if (mirror_latitude is None) and (Bm is None):
-        raise ValueError('Either of the keyword argumets "mirror_latitude" '
-                         'or "Bm" must be specified.')
-    elif (mirror_latitude is not None) and (Bm is not None):
-        raise ValueError('Only one of the keyword arguments '
-                         '"mirror_latitude" or "Bm" must be specified.')
+    optional_params = [mirror_latitude, Bm, pitch_angle]
+    num_specified = len({val for val in optional_params if val is not None})
+
+    if num_specified == 0:
+        raise ValueError(
+            'One of the keyword arguments "mirror_latitude", "Bm", or '
+            '"pitch_angle" must be specified.'
+        )
+    elif num_specified > 1:
+        raise ValueError(
+            'Only one of the keyword arguments "mirror_latitude", "Bm", or '
+            '"pitch_angle" may be specified.'
+        )
 
     # Calculate field line trace
     # ------------------------------------------------------------------------
@@ -108,9 +126,9 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
     )
 
     if trace.n_points == 0:
-        raise FieldLineTraceReturnedEmpty('Trace returned empty')
+        raise FieldLineTraceInsufficient('Trace returned empty')
     if trace.n_points < 50:
-        raise FieldLineTraceReturnedEmpty(
+        raise FieldLineTraceInsufficient(
             f'Trace too small ({trace.n_points} points)'
         )
 
@@ -123,10 +141,13 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
                                       z=trace.points[:, 2])
     trace_sorter = np.argsort(trace_latitude)
 
-    if Bm is None:
+    if mirror_latitude is not None:
         Bm = np.interp(x=np.deg2rad(mirror_latitude),
                        xp=trace_latitude[trace_sorter],
                        fp=trace_field_strength[trace_sorter])
+    elif pitch_angle is not None:
+        Bmin = trace_field_strength.min()
+        Bm = Bmin / np.sin(np.deg2rad(pitch_angle))**2
 
     # Sort field line trace points
     # ------------------------------------------------------------------------
@@ -141,25 +162,7 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
 
     # Find mask for deepest |B| Well
     # ------------------------------------------------------------------------
-    if drift_shell_splitting:
-        Bm_mask = np.zeros(trace_field_strength_sorted.shape, dtype=bool)
-        istart = np.argmin(trace_field_strength_sorted)
-        ii = istart
-        while ii >= 0:
-            if trace_field_strength_sorted[ii] < Bm:
-                Bm_mask[ii] = True
-                ii -= 1
-            else:
-                break
-        istart = np.argmin(trace_field_strength_sorted)
-        while ii < Bm_mask.size:
-            if trace_field_strength_sorted[ii] < Bm:
-                Bm_mask[ii] = True
-                ii += 1
-            else:
-                break
-    else:
-        Bm_mask = (trace_field_strength_sorted < Bm)
+    Bm_mask = (trace_field_strength_sorted < Bm)
 
     # Calculate Function Values
     # ------------------------------------------------------------------------
@@ -171,8 +174,6 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
     integral_integrand = np.sqrt(Bm - trace_field_strength_sorted[Bm_mask])
 
     K = np.trapz(integral_integrand, integral_axis)
-
-    #print(Bm_mask.sum(), K)
 
     # Return results
     # ------------------------------------------------------------------------
@@ -191,10 +192,13 @@ def calculate_K(mesh, starting_point, mirror_latitude=None, Bm=None,
     )
 
 
-def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
-                    num_local_times=4, interp_local_times=True,
-                    interp_npoints=1024, rel_error_threshold=0.075,
-                    max_iters=100, trace_step_size=None, verbose=1000):
+def calculate_LStar(
+    mesh, starting_point, starting_mirror_latitude=None, Bm=None,
+    starting_pitch_angle=None, num_local_times=4, interp_local_times=True,
+    interp_npoints=1024, interval_size_threshold=0.1,
+    rel_error_threshold=0.01, max_iters=100, trace_step_size=None,
+    verbose=1000
+):
     """Calculate the L* adiabatic invariant.
 
     Args
@@ -210,7 +214,8 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
         with cubic splines to allow for less local time calculation.
       interp_npoints: Number of points to use in interplation, only active
         if interp_local_times=True.
-      rel_error_threshold: bisection search pararameter in [0, 1] (float)
+      interval_size_threshold: bisection threshold before linearly
+        interpolating
       max_iters: maximum iterations before erroring out (int)
       trace_step_size: undocumented
       verbose: verbosity level, see joblib.Parallel for more info
@@ -232,9 +237,16 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     starting_rvalue, _, _ = cs.cart2sp(
         x=starting_point[0], y=starting_point[1], z=0
     )
+
+    if Bm is not None:
+        kwargs = {'Bm': Bm}
+    elif starting_mirror_latitude is not None:
+        kwargs = {'mirror_latitude': starting_mirror_latitude}
+    elif starting_pitch_angle is not None:
+        kwargs = {'pitch_angle': starting_pitch_angle}
+
     starting_result = calculate_K(
-        mesh, starting_point, mirror_latitude=starting_mirror_latitude,
-        step_size=trace_step_size,
+        mesh, starting_point, step_size=trace_step_size, **kwargs
     )
 
     # Estimate radius of equivalent K/Bm at other local times using method
@@ -249,22 +261,13 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
 
         starting_rvalue, _ = drift_shell_results[-1]
 
-        if starting_mirror_latitude == 0:
-            # Special case for equitorial mirroring particles-- only need
-            # to search for Bm
-            result = _search_rvalue_by_Bm(
-                starting_result.Bm, starting_rvalue, local_time, max_iters,
-                rel_error_threshold, trace_step_size,
-                mesh=mesh
-            )
-
-        else:
-            result = _bisect_rvalue_by_K(
-                starting_result.K, starting_result.Bm,
-                starting_rvalue, local_time, starting_theta,
-                max_iters, rel_error_threshold, trace_step_size,
-                mesh=mesh
-            )
+        result = _bisect_rvalue_by_K(
+            starting_result.K, starting_result.Bm,
+            starting_rvalue, local_time, starting_theta,
+            max_iters, interval_size_threshold, rel_error_threshold,
+            trace_step_size,
+            mesh=mesh
+        )
 
         drift_shell_results.append(result)
 
@@ -336,70 +339,15 @@ def calculate_LStar(mesh, starting_point, starting_mirror_latitude,
     )
 
 
-def _search_rvalue_by_Bm(
-        target_Bm, starting_rvalue, local_time, max_iters, rel_error_threshold,
-        step_size, mesh=None, mesh_tempfile=None):
-    """Internal helper function to calculate_LStar(). Applies linear search method
-    to find an radius with an B(r) = Bm for equitorial mirroring particles. 
-
-    Args
-
-    Returns
-      rvalue: radius at given local time which produces the same K on 
-        the given mesh (float)
-      calculate_k_result: instance of CalculateKResult corresponding to
-        radius and calculate_K().
-    Raises
-      RuntimeError: maximum number of iterations reached
-    """
-    # Perform bisection method searching for Bm(r)
-    # ------------------------------------------------------------------------
-    assert (mesh is not None) or (mesh_tempfile is not None), \
-        'One of mesh= or mesh_tempfile= is required'
-
-    if mesh_tempfile:
-        mesh = pyvista.read(mesh_tempfile)
-
-    # Interpolate points 25% inside and 50% farther out the nominal rvalue
-    # and search for closest B
-    rvalues = np.arange(0.75 * starting_rvalue,
-                        1.25 * starting_rvalue,
-                        0.001 * starting_rvalue)
-    local_times = np.array([local_time] * rvalues.size)
-    latitudes = np.array([0] * rvalues.size)
-
-    points_search = pyvista.PolyData(np.array(cs.sp2cart(
-        r=rvalues, phi=local_times, theta=latitudes
-    )).T)
-
-    interp = vtk.vtkPointInterpolator()  # uses linear interpolation by default
-    interp.SetInputData(points_search)
-    interp.SetSourceData(mesh)
-    interp.Update()
-
-    points_interp = pyvista.PolyData(interp.GetOutput())
-
-    # Search for closet point and return trace at that point
-    B_search = np.linalg.norm(points_interp['B'], axis=1)
-    i = np.argmin(np.abs(target_Bm - B_search))
-
-    rel_error = np.abs(B_search[i] - target_Bm) / target_Bm
-
-    if rel_error > rel_error_threshold:
-        raise DriftShellBisectionDoesntConverge('Could not find Bm!')
-
-    rvalue = np.linalg.norm(points_interp.points[i, :])    
-    result = calculate_K(mesh, points_interp.points[i, :], Bm=target_Bm,
-                         step_size=step_size)
-
-    return rvalue, result
-
-
-def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
-                        starting_theta, max_iters, rel_error_threshold,
-                        step_size, mesh=None, mesh_tempfile=None):
+def _bisect_rvalue_by_K(
+    target_K, Bm, starting_rvalue, local_time, starting_theta, max_iters,
+    interval_size_threshold, rel_error_threshold, step_size, mesh=None,
+    mesh_tempfile=None
+):
     """Internal helper function to calculate_LStar(). Applies bisection method
-    to find an radius with an equal K.
+    to find an radius with an equal K, stopping when either relative error
+    is sufficiently small or interval being searched is sufficiently small to
+    interpolate.
 
     Only one of mesh or mesh_tempfile is required. Use tempfiles for mutli-
     processing, using direct reference (mesh) for threading.
@@ -411,18 +359,19 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
       local_time: starting local time (radians, float)
       starting_theta: starting latitude (radians, float)
       max_iters: Maximum number of iterations before erroring out (int)
+      interval_size_threshold: bisection threshold before linearly
+        interpolating
       rel_error_threshold: Relative error threshold to consider two K's equal
         (float between [0, 1]).
       mesh: reference to grid and magnetic field
-      mesh_tempfile: path to grid and magnetic field, loaded using 
-        pyvsita
+      mesh_tempfile: path to grid and magnetic field, loaded using pyvsita
     Returns
       rvalue: radius at given local time which produces the same K on 
         the given mesh (float)
       calculate_k_result: instance of CalculateKResult corresponding to
         radius and calculate_K().
     Raises
-      RuntimeError: maximum number of iterations reached
+      DriftShellBisectionDoesntConverge: maximum number of iterations reached
     """
     # Perform bisection method searching for K(Bm, r)
     # ------------------------------------------------------------------------
@@ -435,15 +384,40 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
     upper_rvalue = starting_rvalue * 2
     lower_rvalue = np.linalg.norm(mesh.points, axis=1).min()
     current_rvalue = starting_rvalue
-    rel_errors = []
+    history = []
 
     for _ in range(max_iters):
-        # print(lower_rvalue, upper_rvalue, current_rvalue)  
+        # Check for interval size stopping condition -------------------------
+        interval_size = upper_rvalue - lower_rvalue
+
+        if interval_size < interval_size_threshold:
+            # Calcualte K and upper and lower bounds
+            upper_starting_point = cs.sp2cart(
+                r=upper_rvalue, phi=local_time, theta=starting_theta)
+            upper_result = calculate_K(
+                mesh, upper_starting_point, Bm=Bm, step_size=step_size)
+            lower_starting_point = cs.sp2cart(
+                r=lower_rvalue, phi=local_time, theta=starting_theta)
+            lower_result = calculate_K(
+                mesh, lower_starting_point, Bm=Bm, step_size=step_size)
+
+            # Interpolate between upper and lower bounds to find final rvalue
+            final_rvalue = np.interp(
+                target_K,
+                [upper_result.K, lower_result.K],
+                [upper_rvalue, lower_rvalue])
+            final_starting_point = cs.sp2cart(
+                r=final_rvalue, phi=local_time, theta=starting_theta)
+            final_result = calculate_K(
+                mesh, final_starting_point, Bm=Bm, step_size=step_size)
+
+            return final_rvalue, final_result\
+
+        # Check for relative error stopping condition ------------------------
         current_starting_point = cs.sp2cart(
-            r=current_rvalue, phi=local_time, theta=starting_theta
-        )
-        current_result = calculate_K(mesh, current_starting_point, Bm=Bm,
-                                     step_size=step_size)
+            r=current_rvalue, phi=local_time, theta=starting_theta)
+        current_result = calculate_K(
+            mesh, current_starting_point, Bm=Bm, step_size=step_size)
 
         if target_K == 0 and current_result.K == 0:
             rel_error = 0
@@ -454,17 +428,19 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
             )
 
         if rel_error < rel_error_threshold:
-            # match found!
+            # match found
             return current_rvalue, current_result
-        elif current_result.K < target_K:
-            # too low!
-            rel_errors.append((rel_error, 'too_low', current_rvalue))
+
+        # Continue iterating by halving the interval -------------------------
+        if current_result.K < target_K:
+            # too low
+            history.append((interval_size, 'too_low', current_rvalue))
 
             current_rvalue, lower_rvalue = \
                 ((upper_rvalue + current_rvalue) / 2, current_rvalue)
         else:
-            # too high!
-            rel_errors.append((rel_error, 'too_high', current_rvalue))
+            # too high
+            history.append((interval_size, 'too_high', current_rvalue))
 
             current_rvalue, upper_rvalue = \
                 ((lower_rvalue + current_rvalue) / 2, current_rvalue)
@@ -474,5 +450,5 @@ def _bisect_rvalue_by_K(target_K, Bm, starting_rvalue, local_time,
     # ------------------------------------------------------------------------
     raise DriftShellBisectionDoesntConverge(
         f'Maximum number of iterations {max_iters} reached for local time '
-        f'{local_time:.1f} during bisection ' + repr(rel_errors)
+        f'{local_time:.1f} during bisection ' + repr(history)
     )
