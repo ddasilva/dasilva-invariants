@@ -5,17 +5,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: conda-incubator/setup-miniconda@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
       with:
-        environment-file: environment.yml
-        activate-environment: dasilva-invariants
+        python-version: ${{ matrix.python-version }}
+    - name: Install tools
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install flake8 mypy
     - name: Lint with Flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
-        source activate dasilva-invariants
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
     - name: Static Analysis With MyPy
       run: |
-        source activate dasilva-invariants
         mypy --ignore-missing-imports dasilva_invariants/ bin/
