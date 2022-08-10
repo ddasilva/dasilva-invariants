@@ -41,7 +41,7 @@ def process_hdf_path(hdf_path, radii, mirror_lats):
                 result = invariants.calculate_K(
                     mesh, starting_point, mirror_lat
                 )
-            except invariants.FieldLineTraceReturnedEmpty:
+            except invariants.FieldLineTraceInsufficient:
                 result = None
 
             if result is None:
@@ -56,7 +56,7 @@ def process_hdf_path(hdf_path, radii, mirror_lats):
                 result = invariants.calculate_LStar(
                     mesh, starting_point, mirror_lat, verbose=False,
                 )
-            except invariants.FieldLineTraceReturnedEmpty:
+            except invariants.FieldLineTraceInsufficient:
                 result = None
             except invariants.DriftShellBisectionDoesntConverge:
                 result = None

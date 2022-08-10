@@ -10,6 +10,7 @@ dependencies:
  - ipykernel
  - vtk
  - matplotlib
+ - mypy
  - numba
  - pandas
  - pyhdf
@@ -25,3 +26,4 @@ dependencies:
    - progressbar2
    - line_profiler
    - nbstripout
+   - flake8

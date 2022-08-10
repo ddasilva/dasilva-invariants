@@ -12,20 +12,19 @@ sys.path.append(code_above)
 
 import argparse
 from datetime import datetime
+from typing import cast, Callable, Dict, List, Tuple
 
 from joblib import delayed, Parallel
-import numpy as np
 import pandas as pd
-import pylab as plt
 import pyvista
-import seaborn as sns
 
 from dasilva_invariants import meshes, invariants
 
 
 def _get_tasks(
-    mesh_name, mesh_file_name, pitch_angle, max_local_times, starting_distance
-):
+    mesh_name: str, mesh_file_name: str, pitch_angle: float,
+    max_local_times: int, starting_distance: float
+) -> List[Callable]:
     """Get all parallel tasks to experiment with a given mesh on disk for a
     given pitch angle and starting position at varyying number of local times
 
@@ -40,7 +39,7 @@ def _get_tasks(
     """
     tasks = []
     
-    for i, num_local_times in enumerate(range(2, max_local_times + 1)):
+    for _, num_local_times in enumerate(range(2, max_local_times + 1)):
         key = (mesh_name, num_local_times, pitch_angle)
         
         tasks.append(delayed(_parallel_target)(
@@ -52,7 +51,9 @@ def _get_tasks(
     return tasks
 
 
-def _parallel_target(key, mesh_fname, *args, **kwargs):
+def _parallel_target(
+    key: str, mesh_fname: str, *args, **kwargs
+) -> Tuple[str, float]:
     """Parallel processing target. Returns the key and processed Lstar.
 
     Catches known exceptions. Returns -1 for when drift shell search doesn't
@@ -71,19 +72,21 @@ def _parallel_target(key, mesh_fname, *args, **kwargs):
         mesh = pyvista.read(mesh_fname)
     else:
         mesh = meshes.get_lfm_hdf4_data(mesh_fname)
+
     try:
         return key, invariants.calculate_LStar(mesh, *args, **kwargs).LStar
     except invariants.DriftShellSearchDoesntConverge as e:
         print(e)
-        return key, -1
+        return key, -1.0
     except invariants.FieldLineTraceInsufficient as e:
         print(e)
-        return key, -2
+        return key, -2.0
 
 
 def _generate_tsyganenko_fields(
-    time, t96_file_name, ts05_file_name, lfm_file_name, params_path
-):
+    time: datetime, t96_file_name: str, ts05_file_name: str,
+    lfm_file_name: str, params_path: str
+) -> None:
     """Generate Tsyganenko fields (T95 and TS05) for a given time and save
     to disk.
 
@@ -107,7 +110,9 @@ def _generate_tsyganenko_fields(
         ts05_mesh.save(ts05_file_name)
 
 
-def _get_run_configuration(args):
+def _get_run_configuration(
+    args: argparse.Namespace
+)-> Tuple[Dict[str, str], datetime, int, List[float]]:
     """"Get configuration for the run such as meshes, max number of local times,
     and pitch angles
 
@@ -135,8 +140,8 @@ def _get_run_configuration(args):
         }
 
         tsyganenko_time = datetime(2013, 10, 4, 0, 0)
-        max_local_times = 25
-        
+        max_local_times = 15
+
     elif args.file_set == 'disturbed':
         mesh_file_names = {
             'LFM': os.path.join(
@@ -151,23 +156,23 @@ def _get_run_configuration(args):
             'TS05': os.path.join(os.getcwd(), 'disturbed_ts05.vtk')
         }
 
-        tsyganenko_time = datetime(2013, 10, 4, 0, 0)
+        tsyganenko_time = datetime(2013, 10, 2, 6, 19)
         max_local_times = 80
     else:
-        raise RuntimeError(f'Invalid file_set {argsfile_set}')
+        raise RuntimeError(f'Invalid file_set {args.file_set}')
 
-    pitch_angles = [30, 40, 50, 60, 70, 80, 90]
-
+    pitch_angles = [30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]
+    
     return (mesh_file_names, tsyganenko_time, max_local_times, pitch_angles)
 
 
-def main():
+def main() -> None:
     """Main function of the program."""
     # Parser command line arguments ------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument('file_set', choices=['quiet', 'disturbed'])
     parser.add_argument('n_jobs', type=int)
-    parser.add_argument('--starting-distance', type=float, default=-8.0)
+    parser.add_argument('-d', '--starting-distance', type=float, default=-8.0)
     parser.add_argument('--data-dir', default='/glade/scratch/danieldas/data')
     parser.add_argument(
         '--params-path',
@@ -201,7 +206,7 @@ def main():
     print(f'Total number of tasks: {len(tasks)}')
     par = Parallel(verbose=10000, n_jobs=args.n_jobs, backend='multiprocessing')
 
-    df_contents = {}   # keys are number of local time 
+    df_contents: Dict[int, Dict[str, float]] = {}   # keys are num local time 
     
     for (mesh_name, num_local_times, pitch_angle), lstar in par(tasks):
         if num_local_times not in df_contents:
@@ -225,10 +230,22 @@ def main():
 
     df = pd.DataFrame(df_rows, columns=df_columns)
 
-    print(df.to_string(index=0))
+    print(df.to_string(index=False))
 
-    output_file_name = f'local_times_experiment_{args.file_set}.csv'
-    df.to_csv(output_file_name, index=0)
+    output_file_name = (
+        f'local_times_experiment_{args.file_set}_r{args.starting_distance}.csv'
+    )
+    
+    if os.path.exists(output_file_name):
+        df_exist = pd.read_csv(output_file_name)
+        df_exist = cast(pd.DataFrame, df_exist)
+        
+        for col in df.columns:
+            df_exist[col] = df[col]
+
+        df_exist.to_csv(output_file_name, index=False)        
+    else:
+        df.to_csv(output_file_name, index=False)
 
     print(f'Wrote to {output_file_name}')
 

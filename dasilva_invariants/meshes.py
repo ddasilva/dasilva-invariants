@@ -7,16 +7,21 @@ this project.
 In this module, all grids returned are in units of Re and all magnetic
 fields are in units of Gauss.
 """
+from typing import cast, Dict, List, Union, Tuple
+
 from ai import cs
 from astropy import constants, units
 from datetime import datetime, timedelta
 import PyGeopack as gp
-from joblib import Parallel, delayed
 from matplotlib.dates import date2num
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 import pandas as pd
 from pyhdf.SD import SD, SDC
 import pyvista
+
+from .constants import EARTH_DIPOLE_B0
+from .utils import nanoTesla2Gauss
 
 
 def _fix_lfm_hdf4_array_order(data):
@@ -38,7 +43,7 @@ def _fix_lfm_hdf4_array_order(data):
     return data
 
 
-def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
+def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -53,7 +58,7 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     # ------------------------------------------------------------------------
     X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
 
-    x_re = X_grid.flatten(order='F')  # flat arrays, easier later
+    x_re = X_grid.flatten(order='F')               # flat arrays, easier later
     y_re = Y_grid.flatten(order='F')
     z_re = Z_grid.flatten(order='F')
 
@@ -61,33 +66,30 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path):
     # ------------------------------------------------------------------------
     # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
     r_re = np.sqrt(x_re**2 + y_re**2 + z_re**2)
+    n_points = r_re.size
 
-    B0 = -30e3
-    Bx = 3 * x_re * z_re * B0 / r_re**5
-    By = 3 * y_re * z_re * B0 / r_re**5
-    Bz = (3 * z_re**2 - r_re**2) * B0 / r_re**5
+    B = np.empty((n_points, 3))
+    B[:, 0] = 3 * x_re * z_re * EARTH_DIPOLE_B0 / r_re**5
+    B[:, 1] = 3 * y_re * z_re * EARTH_DIPOLE_B0 / r_re**5
+    B[:, 2] = (3 * z_re**2 - r_re**2) * EARTH_DIPOLE_B0 / r_re**5
 
-    Bx *= units.nT
-    By *= units.nT
-    Bz *= units.nT
-
+    B = nanoTesla2Gauss(B)
+    
     # Create PyVista structured grid.
     # ------------------------------------------------------------------------
     mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
 
     _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid)
 
-    B = np.empty((mesh.n_points, 3))
-    B[:, 0] = Bx.to(units.G).value
-    B[:, 1] = By.to(units.G).value
-    B[:, 2] = Bz.to(units.G).value
     mesh.point_data['B'] = B
 
     # Return output
     return mesh
 
 
-def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
+def _get_fixed_lfm_grid_centers(
+    lfm_hdf4_path: str
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Loads LFM grid centers with singularity patched. 
 
     This code is adapted from Josh Murphy's GhostPy and converted to python
@@ -109,8 +111,8 @@ def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
     # This code implements Josh Murphy's point2CellCenteredGrid() function
     # ------------------------------------------------------------------------
     ni   = X_grid_raw.shape[0] - 1
-    nip1 = X_grid_raw.shape[0]
-    nip2 = X_grid_raw.shape[0] + 1
+    #nip1 = X_grid_raw.shape[0]
+    #nip2 = X_grid_raw.shape[0] + 1
 
     nj   = X_grid_raw.shape[1] - 1
     njp1 = X_grid_raw.shape[1]
@@ -118,7 +120,7 @@ def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
 
     nk   = X_grid_raw.shape[2] - 1
     nkp1 = X_grid_raw.shape[2]
-    nkp2 = X_grid_raw.shape[2] + 1
+    #nkp2 = X_grid_raw.shape[2] + 1
 
     X_grid = np.zeros((ni, njp2, nkp1))
     Y_grid = np.zeros((ni, njp2, nkp1))
@@ -141,14 +143,15 @@ def _get_fixed_lfm_grid_centers(lfm_hdf4_path):
 
     # Convert to units of earth radii (Re)
     # ------------------------------------------------------------------------
-    X_grid_re = (X_grid * units.cm).to(constants.R_earth).value
-    Y_grid_re = (Y_grid * units.cm).to(constants.R_earth).value
-    Z_grid_re = (Z_grid * units.cm).to(constants.R_earth).value
+    # ignore typing here because MyPy doesn't work well with astropy
+    X_grid_re = (X_grid * units.cm).to(constants.R_earth).value  # type: ignore
+    Y_grid_re = (Y_grid * units.cm).to(constants.R_earth).value  # type: ignore
+    Z_grid_re = (Z_grid * units.cm).to(constants.R_earth).value  # type: ignore
 
     return X_grid_re, Y_grid_re, Z_grid_re
 
 
-def get_lfm_hdf4_data(lfm_hdf4_path):
+def get_lfm_hdf4_data(lfm_hdf4_path: str) -> pyvista.StructuredGrid: 
     """Get a magnetic field data + grid from LDM output. Uses an LFM HDF4 file.
 
     Args
@@ -188,7 +191,13 @@ def get_lfm_hdf4_data(lfm_hdf4_path):
     return mesh
 
 
-def _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid):
+def _add_spherical_coords_to_mesh(
+    mesh: pyvista.StructuredGrid,
+    X_grid: NDArray[np.float64],
+    Y_grid: NDArray[np.float64],
+    Z_grid: NDArray[np.float64]
+):
+        
     """Add pre-compute spherical coordinates of grid to mesh in place.
     
     Args
@@ -203,7 +212,11 @@ def _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid):
     mesh.point_data['Theta_grid'] = Theta_grid.flatten(order='F')
 
 
-def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
+def _apply_murphy_lfm_grid_patch(
+    Bx_raw: NDArray[np.float64],
+    By_raw: NDArray[np.float64],
+    Bz_raw: NDArray[np.float64]
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Apply Josh Murphy's patch to the LFM grid.
 
     This code is Josh Murphy's point2CellCenteredVector() function converted
@@ -215,8 +228,8 @@ def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
      Bx, By, Bz: The magnetic field in the patched grid
     """    
     ni   = Bx_raw.shape[0] - 1
-    nip1 = Bx_raw.shape[0]
-    nip2 = Bx_raw.shape[0] + 1
+    #nip1 = Bx_raw.shape[0]
+    #nip2 = Bx_raw.shape[0] + 1
 
     nj   = Bx_raw.shape[1] - 1
     njp1 = Bx_raw.shape[1]
@@ -224,7 +237,7 @@ def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
 
     nk   = Bx_raw.shape[2] - 1
     nkp1 = Bx_raw.shape[2]
-    nkp2 = Bx_raw.shape[2] + 1
+    #nkp2 = Bx_raw.shape[2] + 1
 
     Bx = np.zeros((ni, njp2, nkp1))
     By = np.zeros((ni, njp2, nkp1))
@@ -248,7 +261,7 @@ def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
     return Bx, By, Bz
 
 
-def _calc_cell_centers(A):
+def _calc_cell_centers(A: NDArray[np.float64]) -> NDArray[np.float64]:
     """Calculates centers of cells on a 3D grid.
 
     Args
@@ -279,8 +292,12 @@ def _calc_cell_centers(A):
 
 
 def _get_tsyganenko_on_lfm_grid(
-    model_name, params, time, lfm_hdf4_path, external_field_only=False
-):
+    model_name: str,
+    params: Dict[str, NDArray[np.float64]],
+    time: datetime,
+    lfm_hdf4_path: str,
+    external_field_only: bool = False
+) -> pyvista.StructuredGrid:
     """Internal helper function to get one of the tsyganenko fields on an LFM grid.
 
     Args
@@ -310,14 +327,20 @@ def _get_tsyganenko_on_lfm_grid(
     date = int(time.strftime('%Y%m%d')) 
     ut = int(time.strftime('%H')) + time.minute / 60
 
-    Bx, By, Bz = (
-        gp.ModelField(x_re_sm, y_re_sm, z_re_sm, Date=date, ut=ut,
-                      Model=model_name, CoordIn='SM', CoordOut='SM', **params)
+    gp_tmp = gp.ModelField(
+        x_re_sm, y_re_sm, z_re_sm, Date=date, ut=ut,
+        Model=model_name, CoordIn='SM', CoordOut='SM', **params
     )
+    gp_tmp = cast(
+        Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]],
+        gp_tmp
+    )
+       
+    Bx, By, Bz = gp_tmp
 
-    Bx = (Bx * units.nT).to(units.G).value
-    By = (By * units.nT).to(units.G).value
-    Bz = (Bz * units.nT).to(units.G).value
+    Bx = nanoTesla2Gauss(Bx)
+    By = nanoTesla2Gauss(By)
+    Bz = nanoTesla2Gauss(Bz)
 
     # Calculate dipole field for internal model,
     # see Kivelson and Russel equations 6.3(a)-(c), page 165.
@@ -325,15 +348,14 @@ def _get_tsyganenko_on_lfm_grid(
     if external_field_only:
         r_re_sm = np.sqrt(x_re_sm**2 + y_re_sm**2 + z_re_sm**2)
 
-        B0 = -30e3
-        Bx_int = 3 * x_re_sm * z_re_sm * B0 / r_re_sm**5
-        By_int = 3 * y_re_sm * z_re_sm * B0 / r_re_sm**5
-        Bz_int = (3 * z_re_sm**2 - r_re_sm**2) * B0 / r_re_sm**5
+        Bx_int = 3 * x_re_sm * z_re_sm * EARTH_DIPOLE_B0 / r_re_sm**5
+        By_int = 3 * y_re_sm * z_re_sm * EARTH_DIPOLE_B0 / r_re_sm**5
+        Bz_int = (3 * z_re_sm**2 - r_re_sm**2) * EARTH_DIPOLE_B0 / r_re_sm**5
 
-        Bx_int = (Bx_int * units.nT).to(units.G).value
-        By_int = (By_int * units.nT).to(units.G).value
-        Bz_int = (Bz_int * units.nT).to(units.G).value
-
+        Bx_int = nanoTesla2Gauss(Bx_int)
+        By_int = nanoTesla2Gauss(By_int)
+        Bz_int = nanoTesla2Gauss(Bz_int)
+        
         Bx -= Bx_int
         By -= By_int
         Bz -= Bz_int
@@ -356,7 +378,11 @@ def _get_tsyganenko_on_lfm_grid(
     return mesh
 
 
-def get_tsyganenko_params(times, path, tell_params=True, __T_AUTO_DL_CACHE={}):
+def get_tsyganenko_params(
+    times: Union[ArrayLike, datetime],
+    path: str, tell_params: bool = True,
+    __T_AUTO_DL_CACHE: Dict[str, pd.DataFrame] = {}
+) -> Dict[str, NDArray[np.float64]]:
     """Get parameters for tsyganenko models.
 
     Path is location of the following zip file ond isk:
@@ -369,10 +395,14 @@ def get_tsyganenko_params(times, path, tell_params=True, __T_AUTO_DL_CACHE={}):
     Returns:
       dictionary mapping variable to array of parameters
     """
+    times_list: List[datetime] = []
+    
     try:
-        iter(times)
+        iter(times)  # type: ignore
+        times_list = times  # type: ignore
     except TypeError:
-        times = [times]
+        assert isinstance(times, datetime)
+        times_list = [times]
 
     if path in __T_AUTO_DL_CACHE:
         if tell_params:
@@ -381,18 +411,24 @@ def get_tsyganenko_params(times, path, tell_params=True, __T_AUTO_DL_CACHE={}):
     else:
         if tell_params:
             print(f'Loading {path}')
-        df = pd.read_csv(path, index_col=False, sep='\s+', skiprows=1, names=[
-           'Year', 'Day', 'Hr', 'By', 'Bz', 'V_SW', 'Den_P', 'Pdyn',
-           'G1', 'G2', 'G3', '8_status', 'kp', 'akp3', 'SymH',
-           'Bz1', 'Bz2', 'Bz3', 'Bz4', 'Bz5', 'Bz6',
-           'W1', 'W2', 'W3', 'W4', 'W5', 'W6', '6_stat',
-        ])
+        # ignore typing here because pandas broken
+        df = pd.read_csv(
+            path, index_col=False, delim_whitespace=True, skiprows=1,
+            names=[  # type:ignore
+                'Year', 'Day', 'Hr', 'By', 'Bz', 'V_SW', 'Den_P', 'Pdyn',
+                'G1', 'G2', 'G3', '8_status', 'kp', 'akp3', 'SymH',
+                'Bz1', 'Bz2', 'Bz3', 'Bz4', 'Bz5', 'Bz6',
+                'W1', 'W2', 'W3', 'W4', 'W5', 'W6', '6_stat',
+            ]
+        )
+
+        df = cast(pd.DataFrame, df)
         __T_AUTO_DL_CACHE[path] = df
 
-    min_year = min(time.year for time in times)
-    max_year = max(time.year for time in times)
+    min_year = min(time.year for time in times_list)
+    max_year = max(time.year for time in times_list)
 
-    mask = (df.Year > (min_year - 1)) & (df.Year < (max_year + 1))
+    mask = (df['Year'] > (min_year - 1)) & (df['Year'] < (max_year + 1))
     df = df[mask].copy()
     df['DateTime'] = [
         datetime(int(row.Year), 1, 1) +
@@ -406,7 +442,7 @@ def get_tsyganenko_params(times, path, tell_params=True, __T_AUTO_DL_CACHE={}):
 
     for col in cols:
         params_dict[col] = np.interp(
-            date2num(times), date2num(df.DateTime), df[col]
+            date2num(times_list), date2num(df.DateTime), df[col]
         )
 
     if tell_params:
@@ -416,8 +452,13 @@ def get_tsyganenko_params(times, path, tell_params=True, __T_AUTO_DL_CACHE={}):
 
 
 def get_tsyganenko_on_lfm_grid_with_auto_params(
-    model_name, time, lfm_hdf4_path, param_path, tell_params=True, **kwargs
-):
+    model_name: str,
+    time: datetime,
+    lfm_hdf4_path: str,
+    param_path: str,
+    tell_params: bool = True,
+    **kwargs
+) -> pyvista.StructuredGrid:
     """Get a Tsyganenko field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
