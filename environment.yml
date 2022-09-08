@@ -27,3 +27,5 @@ dependencies:
    - line_profiler
    - nbstripout
    - flake8
+   - dask-jobqueue
+   - dask

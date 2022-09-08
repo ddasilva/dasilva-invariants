@@ -11,10 +11,12 @@ code_above = os.path.join(os.path.abspath(os.path.dirname(__file__)), '..')
 sys.path.append(code_above)
 
 import argparse
+import dask
+from dask.distributed import Client, progress
+from dask_jobqueue import PBSCluster
 from datetime import datetime
 from typing import cast, Callable, Dict, List, Tuple
 
-from joblib import delayed, Parallel
 import pandas as pd
 import pyvista
 
@@ -35,14 +37,14 @@ def _get_tasks(
       max_local_times: upper limit on number of local times (inclusive)
       starting_distance: starting distance (may be negative for into tail)
     Returns
-      list of parallel processing tasks (joblib delayed function calls)
+      list of parallel processing tasks (dasked delayed function calls)
     """
     tasks = []
     
     for _, num_local_times in enumerate(range(2, max_local_times + 1)):
         key = (mesh_name, num_local_times, pitch_angle)
         
-        tasks.append(delayed(_parallel_target)(
+        tasks.append(dask.delayed(_parallel_target)(
             key, mesh_file_name, (starting_distance, 0, 0),
             starting_pitch_angle=pitch_angle,
             num_local_times=num_local_times, verbose=0,
@@ -81,6 +83,9 @@ def _parallel_target(
     except invariants.FieldLineTraceInsufficient as e:
         print(e)
         return key, -2.0
+    except Exception as e:
+        print(e)
+        return key, -3.0
 
 
 def _generate_tsyganenko_fields(
@@ -174,6 +179,7 @@ def main() -> None:
     parser.add_argument('n_jobs', type=int)
     parser.add_argument('-d', '--starting-distance', type=float, default=-8.0)
     parser.add_argument('--data-dir', default='/glade/scratch/danieldas/data')
+    parser.add_argument('-p', '--pbs-project-id', type=str)
     parser.add_argument(
         '--params-path',
         default='/glade/u/home/danieldas/scratch/data/WGhour-latest.d.zip'
@@ -204,11 +210,24 @@ def main() -> None:
 
     # Process tasks, and organize results -----------------------------------    
     print(f'Total number of tasks: {len(tasks)}')
-    par = Parallel(verbose=10000, n_jobs=args.n_jobs, backend='multiprocessing')
-
-    df_contents: Dict[int, Dict[str, float]] = {}   # keys are num local time 
+    df_contents: Dict[int, Dict[str, float]] = {}   # keys are num local time
     
-    for (mesh_name, num_local_times, pitch_angle), lstar in par(tasks):
+    if args.pbs_project_id:
+        print('Setting up PBS cluster')
+        cluster = PBSCluster(
+            cores=50, processes=50, memory='100 GB', queue='regular',
+            walltime='04:00:00',
+            project=args.pbs_project_id)
+        cluster.scale(jobs=args.n_jobs)
+        client = Client(cluster)
+        print('Dashboard', client.dashboard_link)
+        tasks = [task.persist() for task in tasks]
+        progress(tasks)
+        task_results = [task.compute() for task in tasks]
+    else:
+        task_results = dask.compute(tasks)
+
+    for (mesh_name, num_local_times, pitch_angle), lstar in task_results:
         if num_local_times not in df_contents:
             df_contents[num_local_times] = {}
 
@@ -220,7 +239,7 @@ def main() -> None:
     df_rows = []
 
     for num_local_times in sorted(df_contents):
-        row = [num_local_times]
+        row: List[Any] = [num_local_times]
         
         for column_name in df_columns[1:]:
             lstar = df_contents[num_local_times][column_name]
