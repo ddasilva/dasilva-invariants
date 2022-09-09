@@ -127,7 +127,7 @@ def drift_shells(
     r_min: float = 3.0,
     r_max: float = 9.0,
     pa: float = 90.0,
-    num_local_times: int = 50
+    num_local_times: int = 50,        
 ) -> None:
     """Visualize drift shells calculated from calculate_Lstar.
     
@@ -534,7 +534,7 @@ def add_field_isolines_to_equitorial_plot(
     s = mesh.x.shape
     F = np.reshape(field.ravel(), s, order='F')   # field
     Feq = utils.lfm_get_eq_slice(F)
-    levels_list = sorted( * EARTH_DIPOLE_B0 / np.arange(1, levels + 1)**3.0)
+    levels_list = sorted(EARTH_DIPOLE_B0 / np.arange(1, levels + 1)**3.0)
 
     ax.contour(Xeq, Yeq, Feq, levels=levels_list, colors='black')
 
