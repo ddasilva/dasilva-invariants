@@ -47,6 +47,7 @@ class CalculateLStarResult:
     drift_rvalues: NDArray[np.float64]          # radius drift shell at local time
     drift_K: NDArray[np.float64]                # drift shell K values, shorthand
     drift_K_results: List[CalculateKResult]     # Comes from calculate_K()
+    drift_is_closed: bool                      # Whether drift shell is closed
     integral_axis: NDArray[np.float64]          # integaxis local time (radians) 
     integral_theta: NDArray[np.float64]         # integ theta variable
     integral_integrand: NDArray[np.float64]     # integ integrand
@@ -418,6 +419,10 @@ def calculate_LStar(
     # ------------------------------------------------------------------------
     drift_K = np.array([result.K for result in drift_K_results], dtype=float)
     drift_rvalues_arr = np.array(drift_rvalues)
+    drift_is_closed = _test_drift_is_closed(drift_rvalues_arr)
+
+    if not drift_is_closed:
+        LStar = np.nan
     
     return CalculateLStarResult(
         LStar=LStar,
@@ -425,6 +430,7 @@ def calculate_LStar(
         drift_rvalues=drift_rvalues_arr,
         drift_K=drift_K,
         drift_K_results=drift_K_results,
+        drift_is_closed=drift_is_closed,
         integral_axis=integral_axis,
         integral_theta=integral_theta,
         integral_integrand=integral_integrand
@@ -579,12 +585,12 @@ def _linear_search_rvalue_by_Bmin(
         r=initial_rvalue, phi=-local_time, theta=0)    
     initial_result = calculate_K(
         mesh, initial_point, pitch_angle=90, step_size=step_size)
-    initial_Bmin = initial_result.Bm
+    initial_Bmin = initial_result.Bmin
     
     if initial_Bmin < target_Bmin:
-        direction = -1   # too small, walk inward
+        direction = -1     # too small, walk inward
     else: 
-        direction = 1    # too big, walk outward
+        direction = 1      # too big, walk outward
    
     # Major step iteration, scan with low resolution
     # 
@@ -604,17 +610,17 @@ def _linear_search_rvalue_by_Bmin(
             r=current_rvalue, phi=-local_time, theta=0)    
         current_result = calculate_K(
             mesh, current_point, pitch_angle=90, step_size=step_size)
-        current_Bmin = current_result.Bm
+        current_Bmin = current_result.Bmin
 
         history_rvalue.append(current_rvalue)
         history_Bmin.append(current_Bmin)
 
         tmp = sorted(history_Bmin[-2:])
         in_interval = tmp[0] < target_Bmin < tmp[1]
-        local_well = (np.sign(history_Bmin[-1] - history_Bmin[-2])
-                      == direction)
+        #local_well = (np.sign(history_Bmin[-1] - history_Bmin[-2])
+        #              == direction)
 
-        if in_interval or local_well:
+        if in_interval:
             # Proceed to minor step iteration
             clean_finish = True
             minor_start_rvalue = history_rvalue[-2]
@@ -640,17 +646,17 @@ def _linear_search_rvalue_by_Bmin(
             r=current_rvalue, phi=-local_time, theta=0)
         current_result = calculate_K(
             mesh, current_point, pitch_angle=90, step_size=step_size)
-        current_Bmin = current_result.Bm
+        current_Bmin = current_result.Bmin
 
         history_rvalue.append(current_rvalue)
         history_Bmin.append(current_Bmin)
 
         tmp = sorted(history_Bmin[-2:])
         in_interval = tmp[0] < target_Bmin < tmp[1]
-        local_well = (np.sign(history_Bmin[-1] - history_Bmin[-2])
-                      == direction)
+        #local_well = (np.sign(history_Bmin[-1] - history_Bmin[-2])
+        #              == direction)
 
-        if in_interval or local_well:
+        if in_interval:
             # Interpolate between upper and lower bounds to find final rvalue
             final_rvalue, = np.interp(
                 [target_Bmin**(1/3)],
@@ -750,11 +756,11 @@ def _linear_search_rvalue_by_K(
 
         tmp = sorted(history_K[-2:])
         in_interval = tmp[0] < target_K < tmp[1]
-        local_well = (
-            np.sign(history_K[-1] - history_K[-2]) == direction
-            or
-            history_K[-1] == 0.0
-        )
+        #local_well = (
+        #    np.sign(history_K[-1] - history_K[-2]) == direction
+        #    or
+        #    history_K[-1] == 0.0
+        #)
 
         if in_interval:
             # Proceed to minor step iteration
@@ -789,11 +795,11 @@ def _linear_search_rvalue_by_K(
 
         tmp = sorted(history_K[-2:])
         in_interval = tmp[0] < target_K < tmp[1]
-        local_well = (
-            np.sign(history_K[-1] - history_K[-2]) == direction
-            or
-            history_K[-1] == 0.0
-        )
+        #local_well = (
+        #    np.sign(history_K[-1] - history_K[-2]) == direction
+        #    or
+        #    history_K[-1] == 0.0
+        #)
 
         if in_interval:
             # Interpolate between upper and lower bounds to find final rvalue
@@ -812,3 +818,23 @@ def _linear_search_rvalue_by_K(
         repr(list(zip(history_rvalue, history_K))) + ','
         + repr((initial_K, target_K))
     )
+
+
+def _test_drift_is_closed(drift_rvalues: NDArray[np.float64]) -> bool:
+    """Test whether a drift shell is closed.
+
+    Does so by checking wehether the different in radius between the final
+    step and second to final step is no more than 50% bigger than any other
+    two consecutive steps in the drift shell.
+
+    Args
+      drift_rvalues: List of drift radii at local times. Must be in order
+        with final step last.
+    Returns
+      true/false whether drift shell is closed
+    """
+    delta_rvalue_threshold = 1.25 * np.max(np.diff(drift_rvalues[:-1]))
+    delta_rvalue_final =  drift_rvalues[-1] - drift_rvalues[-2]
+    is_closed = (delta_rvalue_final < delta_rvalue_threshold)
+
+    return is_closed
