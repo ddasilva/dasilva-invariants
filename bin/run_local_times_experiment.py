@@ -81,14 +81,9 @@ def _parallel_target(
     try:
         result = invariants.calculate_LStar(mesh, *args, **kwargs)
     except invariants.DriftShellSearchDoesntConverge as e:
-        print(e)
-        return key, -2.0
+        return key, -1.0
     except invariants.FieldLineTraceInsufficient as e:
-        print(e)
-        return key, -3.0
-    except Exception as e:
-        print(e)
-        return key, -4.0
+        return key, -2.0
 
     return key, result.LStar
 
