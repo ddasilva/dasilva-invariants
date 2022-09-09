@@ -7,64 +7,67 @@ sys.path.append(code_above)
 
 import argparse
 import glob
-from joblib import Parallel, delayed
+import dask
+from dask.distributed import Client, progress
+from dask_jobqueue import PBSCluster
 import numpy as np
 import pandas as pd
 from dasilva_invariants import invariants, meshes
 
 
-def process_hdf_path(hdf_path, radii, mirror_lats):
+def process_hdf_path(hdf_path, radius, pitch_angle):
     """Process one HDF file, corresponding to a single timestep of model
     output.
 
     Args
        hdf_path: string path to HDF file
-       radii: list of float starting radii to process (on the nightside)
-       mirror_lats: list of mirror latitudes, in degrees to process 
-
+       radius: starting radii to process (from dayside)
+       pitch_angle: pitch angle to process
     Returns
-      dictionary holding key/value pairs for this row of the CSV file
+      data for row, to be joined on filename
     """
     mesh = meshes.get_lfm_hdf4_data(hdf_path)
     output = {
         'filename': os.path.basename(hdf_path)
     }
 
-    for radius in radii:
-        for mirror_lat in mirror_lats:
-            starting_point = (-radius, 0, 0)
+    starting_point = (-radius, 0, 0)
 
-            # Calculate K adiabtic invariant --------------------------------
-            key = 'K_radius=%.2f:mirror_lat=%.2f' % (radius, mirror_lat)
-
-            try:
-                result = invariants.calculate_K(
-                    mesh, starting_point, mirror_lat
-                )
-            except invariants.FieldLineTraceInsufficient:
-                result = None
-
-            if result is None:
-                output[key] = np.nan
-            else:
-                output[key] = result.K
-
-            # Calcualte Lstar adiabatic invariant ----------------------------
-            key = 'LStar_radius=%.2f:mirror_lat=%.2f' % (radius, mirror_lat)
-
-            try:
-                result = invariants.calculate_LStar(
-                    mesh, starting_point, mirror_lat, verbose=False,
-                )
-            except invariants.FieldLineTraceInsufficient:
-                result = None
-            except invariants.DriftShellBisectionDoesntConverge:
-                result = None
-
-            if result is None:
-                output[key] = np.nan
-            else:
-                output[key] = result.LStar
+    # Calculate K adiabtic invariant --------------------------------
+    key = 'K_radius=%.2f:pitch_angle=%.2f' % (radius, pitch_angle)
+    
+    try:
+        result = invariants.calculate_K(
+            mesh, starting_point, pitch_angle=pitch_angle
+        )
+    except invariants.FieldLineTraceInsufficient:
+        result = None
+        
+    if result is None:
+        output[key] = np.nan
+    else:
+        output[key] = result.K
+        
+    # Calcualte Lstar adiabatic invariant ----------------------------
+    key = 'LStar_radius=%.2f:pitch_angle=%.2f' % (radius, pitch_angle)
+    
+    try:
+        result = invariants.calculate_LStar(
+            mesh, starting_point, starting_pitch_angle=pitch_angle,
+            num_local_times=15
+        )
+    except invariants.FieldLineTraceInsufficient:
+        result = None
+        output[key] = -1.0
+    except invariants.DriftShellSearchDoesntConverge:
+        result = None
+        output[key] = -2.0        
+        
+    if result is not None:
+        if result.drift_is_closed:            
+            output[key] = result.LStar
+        else:
+            output[key] = -3.0
 
     return output
 
@@ -76,13 +79,14 @@ def main():
     parser.add_argument('run_name')
     parser.add_argument('n_jobs', type=int)
     parser.add_argument('--data_dir', default='/glade/scratch/danieldas/data')
-    parser.add_argument('--radii', type=str, default='4,6,8')
-    parser.add_argument('--mirror-lat', type=str, default='15,30')
-
+    parser.add_argument('--radii', type=str, default='-4,-6,-8')
+    parser.add_argument('--pitch-angle', type=str, default='30,60')
+    parser.add_argument('-p', '--pbs-project-id', type=str)
+    
     args = parser.parse_args()
 
     radii = [float(val) for val in args.radii.split(',')]
-    mirror_lats = [float(val) for val in args.mirror_lat.split(',')]
+    pitch_angles = [float(val) for val in args.pitch_angle.split(',')]
 
     # Lookup list of model output (one file per timestep) -------------------
     hdf_dir = f'{args.data_dir}/{args.run_name}/*mhd*.hdf'
@@ -92,18 +96,48 @@ def main():
     # Create joblib tasks and process in parallel ---------------------------
     tasks = []
 
-    for hdf_path in hdf_paths:
-        tasks.append(delayed(process_hdf_path)(hdf_path, radii, mirror_lats))
+    for hdf_path in hdf_paths[::10]:
+        for radius in radii:
+            for pitch_angle in pitch_angles:                
+                tasks.append(dask.delayed(process_hdf_path)(
+                    hdf_path, radius, pitch_angle
+                ))
 
-    par = Parallel(n_jobs=args.n_jobs, backend='multiprocessing', verbose=50000)
-    print(f'Total of {len(tasks)//10} tasks')
-    outputs = par(tasks[::10])
+    print(f'Total of {len(tasks)} tasks')
+        
+    if args.pbs_project_id:
+        print('Setting up PBS cluster')
+        cluster = PBSCluster(
+            cores=50, processes=50, memory='100 GB', queue='regular',
+            walltime='04:00:00',
+            project=args.pbs_project_id)
+        cluster.scale(jobs=args.n_jobs)
+        client = Client(cluster)
+        print('Dashboard', client.dashboard_link)
+        tasks = [task.persist() for task in tasks]
+        progress(tasks)
+        outputs = [task.compute() for task in tasks]
+    else:
+        client = Client(n_workers=args.n_jobs)
+        outputs = dask.compute(tasks)
+
+    # Organize rows
+    df_rows = {}
+    
+    for output in outputs:
+        key = output['filename']
+        if key not in df_rows:
+            df_rows[key] = {}
+
+        df_rows[key].update(output)
 
     # Write output -----------------------------------------------------------
     output_file = args.run_name + '_invariants.csv'
-    df = pd.DataFrame(outputs)
-    df.to_csv(output_file)
+    df = pd.DataFrame(df_rows.values())
+    df.to_csv(output_file, index=False)
 
+    print(df.to_string(index=False))
+    print()
     print(f'Wrote to {output_file}')
 
 
