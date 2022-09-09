@@ -824,7 +824,7 @@ def _test_drift_is_closed(drift_rvalues: NDArray[np.float64]) -> bool:
     """Test whether a drift shell is closed.
 
     Does so by checking wehether the different in radius between the final
-    step and second to final step is no more than 50% bigger than any other
+    step and second to final step is no more than X% bigger than any other
     two consecutive steps in the drift shell.
 
     Args
@@ -833,8 +833,8 @@ def _test_drift_is_closed(drift_rvalues: NDArray[np.float64]) -> bool:
     Returns
       true/false whether drift shell is closed
     """
-    delta_rvalue_threshold = 1.25 * np.max(np.diff(drift_rvalues[:-1]))
-    delta_rvalue_final =  drift_rvalues[-1] - drift_rvalues[-2]
+    delta_rvalue_threshold = 1.5 * np.max(np.abs(np.diff(drift_rvalues)))
+    delta_rvalue_final =  np.abs(drift_rvalues[-1] - drift_rvalues[0])
     is_closed = (delta_rvalue_final < delta_rvalue_threshold)
 
     return is_closed
