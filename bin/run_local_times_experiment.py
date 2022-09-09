@@ -15,7 +15,7 @@ import dask
 from dask.distributed import Client, progress
 from dask_jobqueue import PBSCluster
 from datetime import datetime
-from typing import cast, Callable, Dict, List, Tuple
+from typing import cast, Any, Callable, Dict, List, Tuple
 
 import pandas as pd
 import pyvista
@@ -58,8 +58,11 @@ def _parallel_target(
 ) -> Tuple[str, float]:
     """Parallel processing target. Returns the key and processed Lstar.
 
-    Catches known exceptions. Returns -1 for when drift shell search doesn't
-    converged and -2 when the field line trace is insuficicent.
+    Catches known exceptions. Returns
+
+    -1 when drift shell is not closed
+    -2 for when drift shell search doesn't convert
+    -3 when the field line trace is insuficicent.
 
     Args
       key: key returned alone with result
@@ -76,16 +79,18 @@ def _parallel_target(
         mesh = meshes.get_lfm_hdf4_data(mesh_fname)
 
     try:
-        return key, invariants.calculate_LStar(mesh, *args, **kwargs).LStar
+        result = invariants.calculate_LStar(mesh, *args, **kwargs)
     except invariants.DriftShellSearchDoesntConverge as e:
         print(e)
-        return key, -1.0
+        return key, -2.0
     except invariants.FieldLineTraceInsufficient as e:
         print(e)
-        return key, -2.0
+        return key, -3.0
     except Exception as e:
         print(e)
-        return key, -3.0
+        return key, -4.0
+
+    return key, result.LStar
 
 
 def _generate_tsyganenko_fields(
@@ -162,7 +167,7 @@ def _get_run_configuration(
         }
 
         tsyganenko_time = datetime(2013, 10, 2, 6, 19)
-        max_local_times = 80
+        max_local_times = 40
     else:
         raise RuntimeError(f'Invalid file_set {args.file_set}')
 
@@ -225,6 +230,7 @@ def main() -> None:
         progress(tasks)
         task_results = [task.compute() for task in tasks]
     else:
+        client = Client(n_workers=args.n_jobs)
         task_results = dask.compute(tasks)
 
     for (mesh_name, num_local_times, pitch_angle), lstar in task_results:
