@@ -221,9 +221,9 @@ def main() -> None:
         cluster.scale(jobs=args.n_jobs)
         client = Client(cluster)
         print('Dashboard', client.dashboard_link)
-        tasks = [task.persist() for task in tasks]
+        tasks = [task.persist() for task in tasks]  # type: ignore
         progress(tasks)
-        task_results = [task.compute() for task in tasks]
+        task_results = [task.compute() for task in tasks]  # type: ignore
     else:
         client = Client(n_workers=args.n_jobs)
         task_results = dask.compute(tasks)
