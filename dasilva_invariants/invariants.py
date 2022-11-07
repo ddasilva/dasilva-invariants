@@ -23,7 +23,7 @@ from .utils import cart2sp_point, sp2cart_point
 class CalculateKResult:
     """Class to hold the return value of calculate_K()
 
-    All arrays are sorted by magnetic latitude.
+    All arrays are sorted by magnetic latitude. K is in units of sqrt(G) * Re
     """
     K: float                                      # Second adiabatic invariant (K)
     Bm: float                                     # magnetic mirror strength used
@@ -31,12 +31,15 @@ class CalculateKResult:
     mirror_latitude: Optional[float]              # MLAT at which particle mirrors
     starting_point: Tuple[float, float, float]
 
+
     trace_points: NDArray[np.float64]             # trace points
     trace_latitude: NDArray[np.float64]           # trace latitude
     trace_field_strength: NDArray[np.float64]     # field strenth along trace
     integral_axis: NDArray[np.float64]            # axis of K integration
     integral_axis_latitude: NDArray[np.float64]   # latitude corr to integ axis
     integral_integrand: NDArray[np.float64]       # integrand of K calculation
+
+    _trace: pyvista.core.pointset.PolyData
 
 
 @dataclass
@@ -47,7 +50,7 @@ class CalculateLStarResult:
     drift_rvalues: NDArray[np.float64]          # radius drift shell at local time
     drift_K: NDArray[np.float64]                # drift shell K values, shorthand
     drift_K_results: List[CalculateKResult]     # Comes from calculate_K()
-    drift_is_closed: bool                      # Whether drift shell is closed
+    drift_is_closed: bool                       # Whether drift shell is closed
     integral_axis: NDArray[np.float64]          # integaxis local time (radians) 
     integral_theta: NDArray[np.float64]         # integ theta variable
     integral_integrand: NDArray[np.float64]     # integ integrand
@@ -78,7 +81,8 @@ def calculate_K(
     mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
     pitch_angle: Optional[float] = None,
-    step_size: Optional[float] = None
+    step_size: Optional[float] = None,
+    reuse_trace: Optional[pyvista.core.pointset.PolyData] = None,
 ) -> CalculateKResult:
     """Calculate the K adiabatic invariant.
 
@@ -122,17 +126,20 @@ def calculate_K(
         min_step_length = step_size
         initial_step_length = step_size
 
-    trace = mesh.streamlines(
-        'B',
-        start_position=starting_point,
-        terminal_speed=0.0,
-        max_step_length=max_step_length,
-        min_step_length=min_step_length,
-        initial_step_length=initial_step_length,
-        step_unit='l',
-        max_steps=1_000_000,
-        interpolator_type='c'
-    )
+    if reuse_trace is None:
+        trace = mesh.streamlines(
+            'B',
+            start_position=starting_point,
+            terminal_speed=0.0,
+            max_step_length=max_step_length,
+            min_step_length=min_step_length,
+            initial_step_length=initial_step_length,
+            step_unit='l',
+            max_steps=1_000_000,
+            interpolator_type='c'
+        )
+    else:
+        trace = reuse_trace
 
     if trace.n_points == 0:
         r = np.linalg.norm(starting_point)
@@ -205,6 +212,7 @@ def calculate_K(
         mirror_latitude=mirror_latitude,
         starting_point=starting_point,
 
+        _trace=trace,
         trace_points=trace_points_sorted,
         trace_latitude=trace_latitude_sorted,
         trace_field_strength=trace_field_strength_sorted,
