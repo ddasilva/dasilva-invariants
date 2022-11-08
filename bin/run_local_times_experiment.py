@@ -58,12 +58,6 @@ def _parallel_target(
 ) -> Tuple[str, float]:
     """Parallel processing target. Returns the key and processed Lstar.
 
-    Catches known exceptions. Returns
-
-    -1 when drift shell is not closed
-    -2 for when drift shell search doesn't convert
-    -3 when the field line trace is insuficicent.
-
     Args
       key: key returned alone with result
       mesh_fname: path to loading mesh from disk (may be HDF4 for LFM or .vtk)
