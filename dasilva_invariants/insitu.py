@@ -1,0 +1,82 @@
+"""Class to represent insitu data and methods to load from disk.
+
+See:
+- InSituObervatiion
+- get_rbsp_electron_level3()
+"""
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List, Tuple
+
+from astropy import units
+from astropy.constants import R_earth
+import numpy as np
+from numpy.typing import NDArray
+import PyGeopack as gp
+from spacepy import pycdf
+
+
+@dataclass
+class InSituObservation:
+    """Collection of variables describing an insitu dataset, for use with
+    calculate_LStar_profile().
+    """
+    time: datetime                          # datetimes, no timezone
+    flux: NDArray[np.float64]               # fluxes, units of 1/(cm^2 sec sr keV)
+    energies: NDArray[np.float64]           # energies, units of eV
+    pitch_angles: NDArray[np.float64]       # pitch angles, units of degrees
+    sc_position: Tuple[float, float, float] # spacecraft position coord (SM, Re)
+
+
+def get_rbsp_electron_level3(hdf_path) -> List[InSituObservation]:
+    """Loads InSituObservation instances from a Boyd et al Level 3 pitch angle
+    resolved RBSP dataset file.
+
+    Args:
+      hdf_path: Path to HDF5 file
+    Returns:
+      insitu_datasets: list of struct-like object
+    See also:
+      psd.calculate_LStar_profile()
+    """
+    # Load variables ---------------------------------------------------------
+    cdf = pycdf.CDF(hdf_path)
+    
+    times = cdf['Epoch'][:]
+    energies = cdf['FEDU_Energy'][:] * 1000           # keV -> eV
+    flux = cdf['FEDU'][:]
+    pitch_angles = cdf['FEDU_Alpha'][:]
+    sc_positions_geo = (cdf['Position'][:, :] * units.km).to(R_earth).value
+
+    cdf.close()
+
+    # Convert spacecraft positions to sm coordinate system
+    x_geo, y_geo, z_geo = sc_positions_geo.T
+    dates = [int(time.strftime('%Y%m%d')) for time in times]
+    uts = [int(time.strftime('%H')) + time.minute / 60 for time in times]
+    
+    x_sm, y_sm, z_sm = gp.Coords.ConvCoords(
+        x_geo, y_geo, z_geo, dates, uts,
+        CoordIn='GEO', CoordOut='SM'
+    )
+
+    sc_positions_sm = np.array([x_sm, y_sm, z_sm]).T
+    
+    # variables present in every object, will be copied for each timestep
+    base_contents = {}
+    base_contents['energies'] =  energies
+    base_contents['pitch_angles'] = pitch_angles
+
+    # loop through timestep
+    insitu_observations = []
+    
+    for i in range(times.size):        
+        contents = base_contents.copy()
+        contents['time'] = times[i]
+        contents['flux'] = flux[i]
+        contents['sc_position'] = tuple(sc_positions_sm[i, :].tolist())
+
+        insitu_observations.append(InSituObservation(**contents))
+
+    # Return instance of InSituObservation
+    return insitu_observations

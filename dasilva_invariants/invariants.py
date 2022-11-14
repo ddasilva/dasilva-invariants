@@ -29,8 +29,7 @@ class CalculateKResult:
     Bm: float                                     # magnetic mirror strength used
     Bmin: float                                   # minimum mag field  strength
     mirror_latitude: Optional[float]              # MLAT at which particle mirrors
-    starting_point: Tuple[float, float, float]
-
+    starting_point: Tuple[float, float, float]    # Initial trace point (SM, Re)
 
     trace_points: NDArray[np.float64]             # trace points
     trace_latitude: NDArray[np.float64]           # trace latitude
@@ -89,11 +88,12 @@ def calculate_K(
     Either mirror_latitude, Bm, or pitch_angle must be specified.
 
     Arguments
+      mesh: Grid and magnetic field, loaded using meshes module
       starting_point: Starting point of the field line integration, as
         (x, y, z) tuple of floats, in units of Re.
       mirror_latitude: Lattitude in degrees to use for the mirroring point
-      Bm: magnetic field strength at mirroring point
-      pitch_angle: pitch angle in degrees
+      Bm: Magnetic field strength at mirroring point
+      pitch_angle: Pitch angle in degrees
     Returns
       result: instance of CalculateKResult
     Raises
@@ -319,7 +319,7 @@ def calculate_LStar(
         )
         
     starting_result = calculate_K(
-        mesh, starting_point, step_size=trace_step_size, **kwargs
+        mesh, starting_point, step_size=trace_step_size, **kwargs # type: ignore
     )
 
     # Estimate radius of equivalent K/Bm at other local times using method
