@@ -181,7 +181,7 @@ def main() -> None:
     if args.pbs_project_id:
         print('Setting up PBS cluster')
         cluster = PBSCluster(
-            cores=50, processes=50, memory='100 GB', queue='regular',
+            cores=50, processes=50, memory='150 GB', queue='regular',
             walltime='04:00:00',
             project=args.pbs_project_id)
         cluster.scale(jobs=args.n_jobs)
