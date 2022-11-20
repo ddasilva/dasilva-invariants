@@ -180,6 +180,7 @@ def main() -> None:
     
     if args.pbs_project_id:
         print('Setting up PBS cluster')
+        dask.config.set({'logging.distributed': 'error'})
         cluster = PBSCluster(
             cores=50, processes=50, memory='150 GB', queue='regular',
             walltime='04:00:00',
