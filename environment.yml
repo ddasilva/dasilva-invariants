@@ -29,3 +29,5 @@ dependencies:
    - flake8
    - dask-jobqueue
    - dask
+   - spacepy
+   - types-python-dateutil
