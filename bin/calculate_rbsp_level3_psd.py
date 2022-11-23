@@ -17,6 +17,7 @@ import dateutil.parser
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
+import pyvista
 
 from dasilva_invariants.insitu import (
     InSituObservation,
@@ -84,7 +85,10 @@ def _do_task(
     Returns
       dictionary of row, which maps column name (string) to value
     """
-    mesh = meshes.get_lfm_hdf4_data(mesh_path)
+    if mesh_path.endswith('.vtk'):
+        mesh = pyvista.read(mesh_path)
+    else:
+        mesh = meshes.get_lfm_hdf4_data(mesh_path)
     
     row: Dict[str, Any] = {}
     row['time'] = insitu_observation.time.isoformat()
@@ -119,23 +123,31 @@ def _get_mesh_files(
       mesh_times: array of datetimes
       mesh_paths: array of string file paths
     """
-    hdf_dir = f'{data_dir}/{run_name}/*mhd*.hdf'
-    hdf_paths = glob.glob(hdf_dir)
-    hdf_paths.sort()
+    glob_paths = []
+    glob_paths.extend(glob.glob(f'{data_dir}/{run_name}/*mhd*.hdf'))
+    glob_paths.extend(glob.glob(f'{data_dir}/{run_name}/*.vtk'))
+    glob_paths.sort()
 
-    mesh_times = np.zeros(len(hdf_paths), dtype=object)
-    mesh_paths = np.zeros(len(hdf_paths), dtype=object)    
+    print(f'Found {len(glob_paths)} mesh files')
     
-    for i, hdf_path in enumerate(hdf_paths):
-        file_name = os.path.basename(hdf_path)
-        file_name, file_suff = hdf_path.split('.')
-        date_str = file_name.split('_')[-1]
-        date_str = date_str[::-1].replace('-', ':', 2)[::-1]
-        mesh_time = dateutil.parser.isoparse(date_str).replace(tzinfo=None)
+    mesh_times = np.zeros(len(glob_paths), dtype=object)
+    mesh_paths = np.zeros(len(glob_paths), dtype=object)
+    
+    for i, mesh_path in enumerate(glob_paths):
+        file_name = os.path.basename(mesh_path)
+
+        if file_name.endswith('vtk'):
+            date_str = file_name.split('_')[1].replace('.vtk', '')
+            mesh_time = dateutil.parser.isoparse(date_str).replace(tzinfo=None)
+        else:
+            file_name, file_suff = mesh_path.split('.')
+            date_str = file_name.split('_')[-1]
+            date_str = date_str[::-1].replace('-', ':', 2)[::-1]
+            mesh_time = dateutil.parser.isoparse(date_str).replace(tzinfo=None)
 
         mesh_times[i] = mesh_time
-        mesh_paths[i] = hdf_path
-
+        mesh_paths[i] = mesh_path
+        
     return mesh_times, mesh_paths
 
 
@@ -182,7 +194,7 @@ def main() -> None:
         print('Setting up PBS cluster')
         dask.config.set({'logging.distributed': 'error'})
         cluster = PBSCluster(
-            cores=50, processes=50, memory='150 GB', queue='regular',
+            cores=50, processes=40, memory='125 GB', queue='regular',
             walltime='04:00:00',
             project=args.pbs_project_id)
         cluster.scale(jobs=args.n_jobs)
