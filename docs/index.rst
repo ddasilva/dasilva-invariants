@@ -47,7 +47,7 @@ Below is code which calculates L* using the magnetic fields obtain from TS05 and
 
 Calculating K from LFM
 ----------------------
-This code calculates the second adiabatic invariant K for a particle bouncing through (-6.6, 0, 0) R :sub:`E` (SM coordinate system) and mirroring at at 60° magnetic latitude, using magnetic fields from the LFM simulation code. 
+This code calculates the second adiabatic invariant K for a particle bouncing through (-6.6, 0, 0) R :sub:`E` (SM coordinate system) and mirroring at at 50° magnetic latitude, using magnetic fields from the LFM simulation code. 
 
 .. code-block:: python
 
