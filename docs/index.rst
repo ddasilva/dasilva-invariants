@@ -4,9 +4,9 @@ da Silva Invariants
    
 .. note:: This package is under development and is not yet publically available.
 
-This package provides tools for radiation belt physicists to calculate `adiabiatic invariant parameters <https://en.wikipedia.org/wiki/Adiabatic_invariant#Plasma_physics>`_ from models of the Earth's magnetosphere. The method implemented is based the method outlined in Roderer's 1970 (updated 2014) book "`Dynamics of Geomagnetically Trapped Radation <https://link.springer.com/book/10.1007/978-3-642-49300-3>`_", and further specified in da Silva et al., 2023.
+This package provides tools for radiation belt physicists to peform adiabiatic invariant analysis from magnetic field models of the Earth's magnetosphere. These parameters characterize three periodic motions associated with particles trapped in magnetospheres, and are used to study the dynamical system. For more information on the technique, see `Introduction to Method <intro.html>`_.
 
-This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, as well as the `LFM magnetohydrodynamics simulation model <https://doi.org/10.1016/j.jastp.2004.03.020>`_. Support for additional models is planned in the future.
+This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, as well as the `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ MHD simulation code. Support for additional models is planned in the future.
 
 Install dasilva-invariants
 --------------------------
