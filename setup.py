@@ -39,6 +39,7 @@ setup(
     install_requires=[
         "ai.cs",
         "astropy>=5.1",
+        "cdflib",
         "flake8",
         "mypy",
         "numpy>=1.24",
@@ -46,7 +47,6 @@ setup(
         "PyGeopack",
         "pyhdf" ,
         "scipy>=1.9.3",
-        "spacepy",
         "types-python-dateutil",
     ]
 )

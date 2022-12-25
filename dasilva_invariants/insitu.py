@@ -8,10 +8,10 @@ from typing import List, Tuple
 
 from astropy import units
 from astropy.constants import R_earth
+import cdflib
 import numpy as np
 from numpy.typing import NDArray
 import PyGeopack as gp
-from spacepy import pycdf
 
 __all__ = ["InSituObservation", "get_rbsp_electron_level3"]
 
@@ -58,13 +58,13 @@ def get_rbsp_electron_level3(hdf_path) -> List[InSituObservation]:
         Observations loaded from disk and organized for further processing
     """
     # Load variables ---------------------------------------------------------
-    cdf = pycdf.CDF(hdf_path)
+    cdf = cdflib.CDF(hdf_path)
 
-    times = cdf["Epoch"][:]
-    energies = cdf["FEDU_Energy"][:] * 1000  # keV -> eV
-    flux = cdf["FEDU"][:]
-    pitch_angles = cdf["FEDU_Alpha"][:]
-    sc_positions_geo = (cdf["Position"][:, :] * units.km).to(R_earth).value
+    times = cdf.varget("Epoch")
+    energies = cdf.varget("FEDU_Energy") * 1000  # keV -> eV
+    flux = cdf.varget("FEDU")
+    pitch_angles = cdf.varget("FEDU_Alpha")
+    sc_positions_geo = (cdf.varget("Position") * units.km).to(R_earth).value
 
     cdf.close()
 
