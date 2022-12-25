@@ -35,5 +35,17 @@ setup(
         "Programming Language :: Python :: 3.10",
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
+    ],
+    install_requires=[
+        "ai.cs",
+        "astropy",
+        "flake8"
+        "mypy",
+        "numpy",
+        "pandas",
+        "pyhdf"        
+        "scipy",
+        "spacepy",
+        "types-python-dateutil",
     ]
 )
