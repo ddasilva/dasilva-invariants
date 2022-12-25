@@ -1,8 +1,6 @@
-"""Class to represent insitu data and methods to load from disk.
-
-See:
-- InSituObervatiion
-- get_rbsp_electron_level3()
+"""This module provides tools for loading In-Situ flux observations of the
+from satellite missions. Data loaded through this module is then used with
+the phase space density module, :py:mod:`~dasilva_invariants.psd`.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,35 +13,49 @@ from numpy.typing import NDArray
 import PyGeopack as gp
 from spacepy import pycdf
 
+__all__ = ["InSituObservation", "get_rbsp_electron_level3"]
+
 
 @dataclass
 class InSituObservation:
-    """Collection of variables describing an insitu dataset, for use with
-    calculate_LStar_profile().
+    """Collection of variables describing a 3-dimensional in-situ flux measurement at
+    a single timestep.
+
+    Parameters
+    ----------
+    time : datetime
+       time of observation, without timezone
+    flux : NDArray[np.float64]
+       unidirectional flux measurement, in units of units of 1/(cm^2 sec sr keV)
+    energies : NDArray[np.float64]
+       eneriges associated with flux measurement, in units of eV
+    pitch_angles : NDArray[np.float64]
+       pitch angles associated with flux measurement, in units of degrees
+    sc_position : Tuple[float, float, float]
+       Spacecraft position, in SM coordate system and units of Re
     """
 
-    # datetimes, no timezone
     time: datetime
-    # fluxes, units of 1/(cm^2 sec sr keV)
     flux: NDArray[np.float64]
-    # energies, units of eV
     energies: NDArray[np.float64]
-    # pitch angles, units of degrees
     pitch_angles: NDArray[np.float64]
-    # spacecraft position coordinate (SM, Re)
     sc_position: Tuple[float, float, float]
 
 
 def get_rbsp_electron_level3(hdf_path) -> List[InSituObservation]:
     """Loads InSituObservation instances from a Boyd et al Level 3 pitch angle
-    resolved RBSP dataset file.
+    resolved Radiation Belt Storm Probe (RBSP) dataset file. This data can be
+    downloaded from `RBSP ECT Data Products <https://rbsp-ect.newmexicoconsortium.org/science/DataDirectories.php>`_ .
 
-    Args:
-      hdf_path: Path to HDF5 file
-    Returns:
-      insitu_datasets: list of struct-like object
-    See also:
-      psd.calculate_LStar_profile()
+    Parameters
+    ----------
+    hdf_path : str
+        Path to HDF5 RBSP Level 3 pitch angle resolved data file
+
+    Returns
+    -------
+    insitu_datasets : List[:py:class:`~InSituObservation`]
+        Observations loaded from disk and organized for further processing
     """
     # Load variables ---------------------------------------------------------
     cdf = pycdf.CDF(hdf_path)

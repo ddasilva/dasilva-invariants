@@ -1,9 +1,5 @@
-"""Calculation of f(L*) vs L* profiles at fixedb mu and K.
-
-Much of the algorithmic work of this section is based on Green 2004, Journal of
-Geophysical Research: Space Physics.
-
-The primary function for this module is calculate_LStar_profile()
+"""Calculation of f(L*) vs L* profiles at fixedb mu and K. This code implements the algorithm
+outlined for this task in `Green and Kivelson, 2004 <https://doi.org/10.1029/2003JA01015>`_.
 """
 from dataclasses import dataclass
 from typing import Any, Dict
@@ -19,21 +15,38 @@ from .insitu import InSituObservation
 from .invariants import calculate_K, calculate_LStar, CalculateLStarResult
 from .utils import interpolate_mesh
 
+__all__ = ["CalculateLStarProfileResult", "calculate_LStar_profile"]
+
 
 @dataclass
 class CalculateLStarProfileResult:
     """Phase space density (PSD) observation, f(L*) and its associated L*.
 
-    See alse:
-      calculate_LStar_profile()
+    Parameters
+    -----------
+    phase_space_density : float
+       Phase space density at corresponding L*, in units of (c / (cm*MeV))**3
+    LStar : float
+       LStar corresponding to phase space density, unitless
+    lstar_result : :py:class:`~CalculateLStarResult`
+       Result from `:py:func:`dasilva_invariants.invariants.calculate_LStar`
+       which fully specifies the drift shell
+    fixed_mu : float
+       Fixed first adiabatic invariant used in this calculation, units of
+       MeV/G
+    fixed_K : float
+       Fixed second adiabatic invariant used in this calculation, units of
+       sqrt(G) Re
+    particle : {'electron', 'proton'}
+       Type of particle used in this calculation
     """
 
-    phase_space_density: float  # f(L*)
-    LStar: float  # Corresponding LStar
-    lstar_result: CalculateLStarResult  # return of calculate_LStar()
-    fixed_mu: float  # Fixed mu, units of MeV/G
-    fixed_K: float  # Fixed K, sqrt(G) Re
-    particle: str  # Either 'electron' or 'proton'
+    phase_space_density: float
+    LStar: float
+    lstar_result: CalculateLStarResult
+    fixed_mu: float
+    fixed_K: float
+    particle: str
 
 
 def calculate_LStar_profile(

@@ -1,7 +1,7 @@
 """Tools for obtaining meshes for use in calculating invariants.
 
 Meshes are grids + magnetic field vectors at those grid points. They
-are instances of pyvista.StructuredGrid. PyVista is used throughout
+are instances of `pyvista.StructuredGrid`. PyVista is used throughout
 this project.
 
 In this module, all grids returned are in units of Re and all magnetic
@@ -11,6 +11,7 @@ from typing import cast, Dict, List, Union, Tuple
 
 from ai import cs
 from astropy import constants, units
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 import PyGeopack as gp
 from matplotlib.dates import date2num
@@ -23,6 +24,13 @@ import pyvista
 from .constants import EARTH_DIPOLE_B0
 from .utils import nanoTesla2Gauss
 
+__all__ = [
+    "get_dipole_mesh_on_lfm_grid",
+    "get_lfm_hdf4_data",
+    "get_tsyganenko_on_lfm_grid_with_auto_params",
+    "get_tsyganenko_params",
+]
+
 
 def _fix_lfm_hdf4_array_order(data):
     """Apply fix to LFM data to account for strange format in HDF4 file.
@@ -33,10 +41,16 @@ def _fix_lfm_hdf4_array_order(data):
        Data is stored in C-order, but shape is transposed in
        Fortran order!  Why?  Because LFM stores its arrays using
        the rather odd A++/P++ library.  Let's reverse this evil:
-    Args
-      data: array with 3 dimensions
+
+    Arguments
+    ---------
+    data : NDArray[np.float64]
+        Scalar field over model grid
+
     Returns
-      data: array with (i, j, k) fixed
+    --------
+    data : NDArray[np.float64]
+        Scalar field over model grid, with dimensions fixed
     """
     s = data.shape
     data = np.reshape(data.ravel(), (s[2], s[1], s[0]), order="F")
@@ -47,12 +61,16 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
-    Args
-      lfm_hdf4_path: Path to LFM hdf4 file
+    Parameters
+    ----------
+    lfm_hdf4_path : str
+        Path to LFM file in HDF4 format
+
     Returns
-      mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with dipole
-        field values. Grid is in units of Re and magnetic field is is units of
-        Gauss.
+    -------
+    mesh : `pyvista.StrucutredGrid`
+        Mesh on LFM grid with dipole field values. Grid is in units of Re and
+        magnetic field is is units of Gauss
     """
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
@@ -152,14 +170,18 @@ def _get_fixed_lfm_grid_centers(
 
 
 def get_lfm_hdf4_data(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
-    """Get a magnetic field data + grid from LDM output. Uses an LFM HDF4 file.
+    """Get a magnetic field data + grid from LFM output. Uses an LFM HDF4 file.
 
-    Args
-      lfm_hdf4_path: Path to LFM hdf4 file
+    Parameters
+    -----------
+    lfm_hdf4_path : str
+        Path to LFM file in HDF4 format
+
     Returns
-      mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with LFM dynamic
-        field values. Grid is in units of Re and magnetic field is is units o
-        Gauss.
+    --------
+    mesh : `pyvista.StrucutredGrid`
+        Mesh on LFM grid with LFM magnetic field values. Grid is in units of Re
+        and magnetic field is is units of Gauss
     """
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
@@ -197,14 +219,18 @@ def _add_spherical_coords_to_mesh(
     Y_grid: NDArray[np.float64],
     Z_grid: NDArray[np.float64],
 ):
-
     """Add pre-compute spherical coordinates of grid to mesh in place.
 
-    Args
-      mesh: Mesh to add to
-      X_grid: three-dimensional grid of X coordinates
-      Y_grid: three-dimensional grid of Y coordinates
-      Z_grid: three-dimensional grid of Z coordinates
+    Parameters
+    ----------
+    mesh : `pyvista.StructuredGrid`
+        Mesh to add to spherical coordinates to
+    X_grid : NDArray[np.float64]
+        Three-dimensional grid of X coordinates
+    Y_grid : NDArray[np.float64]
+        Three-dimensional grid of Y coordinates
+    Z_grid : NDArray[np.float64]
+        Three-dimensional grid of Z coordinates
     """
     R_grid, Theta_grid, Phi_grid = cs.cart2sp(X_grid, Y_grid, Z_grid)
     mesh.point_data["R_grid"] = R_grid.flatten(order="F")
@@ -264,11 +290,16 @@ def _apply_murphy_lfm_grid_patch(
 def _calc_cell_centers(A: NDArray[np.float64]) -> NDArray[np.float64]:
     """Calculates centers of cells on a 3D grid.
 
-    Args
-      3D grid holding grid positions on one of X, Y or Z for each grid
-      coordinate.
+    Parameters
+    ----------
+    A : NDArray[np.float64]
+        3D grid holding grid positions on one of X, Y or Z for each grid
+        coordinate.
+
     Returns
-      3D array of X, Y, or Z positions for grid coordinates
+    -------
+    centers : NDarray[np.float64][
+        3D array of X, Y, or Z positions for grid coordinates
     """
     s = A.shape
 
@@ -300,18 +331,28 @@ def _get_tsyganenko_on_lfm_grid(
 ) -> pyvista.StructuredGrid:
     """Internal helper function to get one of the tsyganenko fields on an LFM grid.
 
-    Args
-      model_name: Name of the model, either 'T96' or 'T04'
-      params: Model parameters: tuple of 10 values
-      time: Time for T89 model, sets parameters
-      lfm_hdf4_path: Path to LFM HDF4 file to set grid.
-      external_field_only: Set to True to not include the internal (dipole) model
-      force_zero_tilt: Force a zero tilt when calculating the file
+    Parameters
+    -----------
+    model_name : {'T96', 'TS05'}
+        Name of the magnetic field model to use.
+    params : dictionary of string to array
+        Parameters to support Tsyganenko magnetic field mode
+    time : datetime, no timezone
+        Time to support the Tsyganenko magnetic field model
+    lfm_hdf4_path : str
+        Path to LFM file in HDF4 format to provide grid.
+    external_field_only : boopl
+        Set to True to not include the internal (dipole) model
+    force_zero_tilt : bool
+        Force a zero tilt when calculating the magnetic field
+
     Returns
-      mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with dipole
-        field values. Grid is in units of Re and magnetic field is is units of
-        Gauss.
+    -------
+    mesh : `pyvista.StrucutredGrid`
+        Magnetic model on LFM grid with dipole field values. Grid is in units of
+        Re and magnetic field is is units of Gauss.
     """
+
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
     X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid = _get_fixed_lfm_grid_centers(
@@ -383,22 +424,29 @@ def _get_tsyganenko_on_lfm_grid(
 
 
 def get_tsyganenko_params(
-    times: Union[ArrayLike, datetime],
+    times: Union[Sequence, datetime],
     path: str,
     tell_params: bool = True,
     __T_AUTO_DL_CACHE: Dict[str, pd.DataFrame] = {},
 ) -> Dict[str, NDArray[np.float64]]:
     """Get parameters for tsyganenko models.
 
-    Path is location of the following zip file ond isk:
-    http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip
+    Parameters
+    -----------
+    times : List of datetime, no timezones
+        Times to get paramters for
+    path : str
+        Path to zip file (may be URL if network enabled). It is fastest
+        to download this file and save it to disk, but this URL may be passed
+        automatically to download every time
+        http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip
+    tell_params : bool, optional
+        If set to true, prints parameters to output
 
-    Args:
-      times: List of times, or individual time
-      path: Path to zip file (may be URL if network enabled)
-      tell_params: If set to true, prints parameters to output
-    Returns:
-      dictionary mapping variable to array of parameters
+    Returns
+    -------
+    params : dict, str to array
+        dictionary mapping variable to array of parameters
     """
     times_list: List[datetime] = []
 
@@ -493,21 +541,34 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(
     """Get a Tsyganenko field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
-    Args
-      model_name: String name of model (T96 or T04)
-      time: Time for model, sets auto omni paramteters
-      lfm_hdf4_path: Path to LFM HDF4 file to set grid.
-      params_path: Path to OMNI records file, can be URL to download.
-      tell_params: Print OMNI paramteters retreived to standard output
-      external_field_only: Set to True to not include the internal (dipole)
-        model
-      force_zero_tilt: Force a zero tilt when calculating the file
-      n_jobs: Number of parallel processes to use (-1 for all available cores)
-      verbose: Verbosity level (see joblib.Parallel documentation)
+    Parameters
+    ----------
+    model_name : {'T96', 'TS05'}
+        Name of the magnetic field model to use.
+    time : datetime, no timezone
+        Time to support the Tsyganenko magnetic field model
+    lfm_hdf4_path : str
+        Path to LFM file in HDF4 format to provide grid.
+    params_path : str
+        Path to OMNI records file, can be URL to download. This file can be
+        downloaded from http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip
+    tell_params : bool, optional
+        Print OMNI paramteters retreived to standard output
+    external_field_only : boo, optional
+        Set to True to not include the internal (dipole) model
+    force_zero_tilt : bool, optional
+        Force a zero tilt when calculating the magnetic field
+    n_jobs : int, optional
+        Number of parallel processes to use (-1 for all available cores)
+    verbose : bool
+        Verbosity level to use with Parallel processing (see `joblib.Parallel`
+        documentation)
+
     Returns
-      mesh: pyvista.StrucutredGrid instance, mesh on LFM grid with dipole
-        field values. Grid is in units of Re and magnetic field is is units of
-        Gauss.
+    -------
+    mesh : `pyvista.StrucutredGrid`
+        Tsyganenko magnetic field model on LFM grid. Grid is in units of Re and magnetic
+        field is is units of Gauss.
     """
     # Lookup params  -----------------------------------------------
     params = get_tsyganenko_params(time, param_path, tell_params=tell_params)

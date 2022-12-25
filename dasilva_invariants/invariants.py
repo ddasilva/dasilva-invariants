@@ -1,10 +1,9 @@
 """Numerical calculation of adiabatic invariants.
 
 The public interface functions are as follows, each of which return dataclasses
-defined specifically for the function.
-
-  - calculate_K() -> CalculateKResult
-  - calculate_LStar() -> CalculateLStarResult
+defined specifically for the function. These functions raise a documented set of
+exceptions, which should be caught to detect problems which may occur during
+processing.
 """
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -15,40 +14,68 @@ from numpy.typing import NDArray
 import pyvista
 from scipy import interpolate
 
-from .utils import cart2sp_point, sp2cart_point
+from . import utils
+
+__all__ = [
+    "CalculateKResult",
+    "CalculateLStarResult",
+    "calculate_K",
+    "calculate_LStar",
+    "FieldLineTraceInsufficient",
+    "DriftShellSearchDoesntConverge",
+    "DriftShellLinearSearchDoesntConverge",
+    "DriftShellBisectionDoesntConverge",
+]
 
 
 @dataclass
 class CalculateKResult:
-    """Class to hold the return value of calculate_K()
+    """Class to hold the return value of calculate_K(). This class also provides
+    information to inspect the bounce path determined while calculating K.
 
-    All arrays are sorted by magnetic latitude. K is in units of sqrt(G) * Re
+    All arrays are sorted by magnetic latitude.
+
+    Parameters
+    ----------
+    K : float
+        The second adiabatic invariant, in units of sqrt(G) * Re
+    Bm : float
+        Magnetic field strength at mirroring point, in units of Gauss
+    Bmin : float
+        Minimum magnetic field strength along the bounce path, in units of Gauss
+    mirror_latitude : float, optional
+        If mirroring point was specified in terms of a magnetic latitude, this
+        is that magnetic latitude. Units of degrees in SM coordinate system.
+    starting_point : tuple of floats
+        Starting point of the field line trace used to determine the bounce
+        path. Units of Re in SM coordinate system.
+    trace_points : NDArray[np.float64]
+        Array of cartesian coordinates along the bounce path
+    trace_latitude : NDArray[np.float64]
+        Array of magnetic latitudes along the bounce path, in units of radians
+    trace_field_strength : NDArray[np.float64]
+        Array of magnetic field strengths along the bounce path, in units of
+        Gauss.
+    integral_axis_latitude : NDArray[np.float64]
+        Corresponds to the intergration used to find K. These are the magnetic
+        latitudes across the integration domain (bounce path)
+    integral_integrand : NDArray[np.float64]
+        Corresponds to the intergration used to find K. These are the integrand
+        values across the integration domain (bounce path)
     """
 
-    # Second adiabatic invariant (K)
     K: float
-    # magnetic mirror strength used
     Bm: float
-    # minimum mag field  strength
     Bmin: float
-    # MLAT at which particle mirrors
     mirror_latitude: Optional[float]
-    # Initial trace point (SM, Re)
     starting_point: Tuple[float, float, float]
 
-    # trace points
     trace_points: NDArray[np.float64]
-
-    # trace latitude
     trace_latitude: NDArray[np.float64]
-
-    # field strenth along trace
     trace_field_strength: NDArray[np.float64]
-    # axis of K integration
+
     integral_axis: NDArray[np.float64]
-    # latitude corr to integ axis
     integral_axis_latitude: NDArray[np.float64]
-    # integrand of K calculation
     integral_integrand: NDArray[np.float64]
 
     _trace: pyvista.core.pointset.PolyData
@@ -56,7 +83,39 @@ class CalculateKResult:
 
 @dataclass
 class CalculateLStarResult:
-    """Class to hold the return value of calculate_LStar()"""
+    """Class to hold the return value of calculate_LStar(). This includes the
+    LStar adiabatic invariant as well as all details required to reconstruct
+    the full drift shell.
+
+    Parameters
+    ----------
+    LStar : float
+        Third adiabatic invariant (L*), unitless
+    drift_local_times : NDArray[np.float64]
+        Array of magnetic local times around the drive shell.
+    drift_rvalues : NDArray[np.float64]
+        Array of drift shell radius at each local time, to be paired with
+        `drift_local_times`
+    drift_K : NDArray[np.float64]
+        Array of second adiabatic invariant (K) at each local time, to be
+        paired with `drift_local_times`
+    drift_K_results : List[:py:class:`~CalculateKResult`]
+        Array of :py:class:`~CalculateKResult` instances at each local time,
+        to be paired with `drift_local_times. Through this object one can
+        obtain a bounce motion path at each local time.
+    drift_is_closed : bool
+        Boolean whether the drift shell was detected to be closed. For more
+        information, see da Silva et al., 2023
+    integral_axis : NDArray[np.float64]
+        Corresponding to the integral used to calculate LStar, this is the
+        integration axis in local time. Units of radians
+    integral_theta : NDArray[np.float64]
+        Corresponding to the integral used to calculate LStar, this is the
+        variable integrated over. Units of radians
+    integral_integrand : NDArray[np.float64]
+        Corresponding to the integral used to calculate LStar, this is the
+        integrand
+    """
 
     # Third adiabatic invariant (L*)
     LStar: float
@@ -106,21 +165,35 @@ def calculate_K(
     step_size: Optional[float] = None,
     reuse_trace: Optional[pyvista.core.pointset.PolyData] = None,
 ) -> CalculateKResult:
-    """Calculate the K adiabatic invariant.
+    """Calculate the third adiabatic invariant, K.
 
-    Either mirror_latitude, Bm, or pitch_angle must be specified.
+    Either `mirror_latitude`, `Bm`, or `pitch_angle` must be specified.
 
-    Arguments
-      mesh: Grid and magnetic field, loaded using meshes module
-      starting_point: Starting point of the field line integration, as
-        (x, y, z) tuple of floats, in units of Re.
-      mirror_latitude: Lattitude in degrees to use for the mirroring point
-      Bm: Magnetic field strength at mirroring point
-      pitch_angle: Pitch angle in degrees
+    Parameters
+    ----------
+    mesh : pyvista.StructuredGrid
+        Grid and magnetic field, loaded using meshes module
+    starting_point : tuple of floats
+        Starting point of the field line integration, as (x, y, z) tuple of
+        floats, in units of Re.
+    mirror_latitude : float, optional
+        Magnetic latitude in degrees to use for the mirroring point, to
+        specify bounce path
+    Bm : float, optional
+        Magnetic field strength at mirroring point, to specify bounce path
+    pitch_angle : float, optional
+        Local pitch angle at starting point, to specify the bounce path. In
+        units of degrees
+
     Returns
-      result: instance of CalculateKResult
+    -------
+    result : :py:class:`~CalculateKResult`
+         Calcualte K variable and related bounce path information
+
     Raises
-      FieldLineTraceInsufficient: field line trace empty or too small
+    ------
+    FieldLineTraceInsufficient
+        field line trace empty or too small
     """
     # Validate function arguments
     # ------------------------------------------------------------------------
@@ -245,7 +318,7 @@ def calculate_LStar(
     mesh: pyvista.StructuredGrid,
     starting_point: Tuple[float, float, float],
     mode: str = "linear",
-    num_local_times: int = 4,
+    num_local_times: int = 16,
     starting_mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
     starting_pitch_angle: Optional[float] = None,
@@ -259,56 +332,68 @@ def calculate_LStar(
     interp_npoints: int = 1024,
     verbose: bool = False,
 ) -> CalculateLStarResult:
-    """Calculate the L* adiabatic invariant.
+    """Calculate the third adiabatic invariant, L*
 
     Can be run in two modes, 'linear' and 'bisection'. Linear mode is
-    generally recommended.
+    slower, but gives better results for distributed magnetic fields.
 
-    Args
-      mesh: grid and magnetic field, loaded using meshes module
-      starting_point: Starting point of the field line integration, as
-        (x, y, z) tuple of floats, in units of Re.
+    Parameters
+    ----------
+    mesh : pyvista.StructuredGrid
+        grid and magnetic field, loaded using meshes module
+    starting_point : tuple of floats
+        Starting point of the field line integration, as
+        (x, y, z) tuple of floats, in units of Re
+    mode : {'linear', 'bisection'}, optional
+        Linear is more suiltable for non-quiet fields, but bisection may be
+        faster. Defaults to 'linear'
+    num_local_times : int, optional
+        Number of local times spaced evenly around the drift shell to solve
+        for with bisection
+    starting_mirror_latitude : float, optional
+        Latitude in degrees to use for the mirroring point for the local time
+        associated with the starting point to calculate drift shell
+    Bm : float, optional
+        Magnetic field strength at mirror point used to calculate drift
+        shell
+    starting_pitch_angle : float, optional
+        Pitch angle at Bmin at starting point to calcualte the drift shell.
+        If set to 90.0, then a special path will be taken through the code
+        where the drift shell is used by searching for isolines of Bmin instead
+        of K
+    major_step : float, optional
+        Only used by mode='linear'. Size of large step (float, units of Re)
+        to find rough location of drift shell radius
+    minor_step : float, optional
+        Only used by mode='linear'. Size of small step (float, units of Re)
+        to refine drift shell radius
+    interval_size_threshold : float, optional
+        Only used by mode='bisection'. Bisection threshold before linearly
+        interpolating
+    max_iters : int, optional
+        Used by all modes. Maximum iterations before raising exception.
+    trace_step_size : float, optional
+        Used by all modes. step size used to trace field lines
+    interp_local_times : bool, optional
+        Interpolate intersection latitudes for local times with cubic splines
+        to allow for less local time calculation
+    interp_npoints : int, optional
+        Number of points to use in interplation, only active if
+        interp_local_times=True
+    verbose : bool, optional
+        Set to true to enable logging messages to console (stdout)
 
-      mode: either 'linear' or 'bisection'. Linear is more suiltable for
-       non-quiet fields, but bisection may be faster in some cases
-      num_local_times: Number of local times spaced evenly around the
-        drift shell to solve for with bisection (int)
-
-      starting_mirror_latitude: Lattitude in degrees to use for the
-        mirroring point for the local time associated with the starting
-        point to calculate drift shell (float)
-      Bm: Magnetic field strength at mirror point used to calculate drift
-        shell (float)
-      starting_pitch_angle: Pitch angle at Bmin at starting point to
-        calcualte the drift shell. If set to 90.0, then a special path
-        will be taken through the code where the drift shell is used by
-        searching for isolines of Bmin instead of K.
-
-      major_step: Only used by mode='linear'. Size of large step (float,
-        units of Re) to find rough location of drift shell radius.
-      minor_step: Only used by mode='linear'. Size of small step (float,
-        units of Re) to refine drift shell radius.
-      interval_size_threshold: Only used by mode='bisection'. Bisection
-        threshold before linearly interpolating.
-      max_iters: Used by all modes. Maximum iterations before raising exception,
-        (int).
-      trace_step_size: Used by all modes. step size used to trace field lines
-        (float).
-
-      interp_local_times: Interpolate intersection latitudes for local times
-        with cubic splines to allow for less local time calculation.
-      interp_npoints: Number of points to use in interplation, only active
-        if interp_local_times=True.
-
-      verbose: where to log messages to standard out (bool)
     Returns
-      result: instance of CalculateLStarResult
+    -------
+      result: :py:class:`~CalculateLStarResult`
     """
     # Determine list of local times we will search
     # ------------------------------------------------------------------------
-    _, _, starting_phi = cart2sp_point(*starting_point)
+    _, _, starting_phi = utils.cart2sp_point(*starting_point)
 
-    starting_rvalue, _, _ = cart2sp_point(x=starting_point[0], y=starting_point[1], z=0)
+    starting_rvalue, _, _ = utils.cart2sp_point(
+        x=starting_point[0], y=starting_point[1], z=0
+    )
 
     drift_local_times = starting_phi + (
         2 * np.pi * np.arange(num_local_times) / num_local_times
@@ -519,10 +604,10 @@ def _bisect_rvalue_by_K(
 
         if interval_size < interval_size_threshold:
             # Calculate K and upper and lower bounds
-            lower_starting_point = sp2cart_point(
+            lower_starting_point = utils.sp2cart_point(
                 r=lower_rvalue, phi=-local_time, theta=0
             )
-            upper_starting_point = sp2cart_point(
+            upper_starting_point = utils.sp2cart_point(
                 r=upper_rvalue, phi=-local_time, theta=0
             )
 
@@ -539,7 +624,7 @@ def _bisect_rvalue_by_K(
                 [upper_result.K, lower_result.K],
                 [upper_rvalue, lower_rvalue],
             )
-            final_starting_point = sp2cart_point(
+            final_starting_point = utils.sp2cart_point(
                 r=final_rvalue, phi=-local_time, theta=0
             )
 
@@ -550,7 +635,7 @@ def _bisect_rvalue_by_K(
             return final_rvalue, final_result
 
         # Check for relative error stopping condition ------------------------
-        current_starting_point = sp2cart_point(
+        current_starting_point = utils.sp2cart_point(
             r=current_rvalue, phi=-local_time, theta=0
         )
 
@@ -627,7 +712,7 @@ def _linear_search_rvalue_by_Bmin(
       DriftShellBisectionDoesntConverge: maximu number of iterations reached
     """
     # Decide which direction to iterate --------------------------------------
-    initial_point = sp2cart_point(r=initial_rvalue, phi=-local_time, theta=0)
+    initial_point = utils.sp2cart_point(r=initial_rvalue, phi=-local_time, theta=0)
     initial_result = calculate_K(
         mesh, initial_point, pitch_angle=90, step_size=step_size
     )
@@ -652,7 +737,7 @@ def _linear_search_rvalue_by_Bmin(
 
     for i in range(1, max_iters + 1):
         current_rvalue = initial_rvalue + i * major_step * direction
-        current_point = sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
+        current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
         current_result = calculate_K(
             mesh, current_point, pitch_angle=90, step_size=step_size
         )
@@ -687,7 +772,7 @@ def _linear_search_rvalue_by_Bmin(
 
     for i in range(1, max_iters + 1):
         current_rvalue = minor_start_rvalue + i * minor_step * direction
-        current_point = sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
+        current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
         current_result = calculate_K(
             mesh, current_point, pitch_angle=90, step_size=step_size
         )
@@ -706,7 +791,7 @@ def _linear_search_rvalue_by_Bmin(
                 np.array(history_Bmin[-2:]) ** (1 / 3),
                 history_rvalue[-2:],
             )
-            final_initial_point = sp2cart_point(
+            final_initial_point = utils.sp2cart_point(
                 r=final_rvalue, phi=-local_time, theta=0
             )
             final_result = calculate_K(
@@ -764,7 +849,7 @@ def _linear_search_rvalue_by_K(
     # The main point here is that in a small neighborhood, K shrinks with
     # increasing rvalue.
     # ---------------------------------------------------------------------
-    initial_point = sp2cart_point(r=initial_rvalue, phi=-local_time, theta=0)
+    initial_point = utils.sp2cart_point(r=initial_rvalue, phi=-local_time, theta=0)
     initial_result = calculate_K(mesh, initial_point, Bm=Bm, step_size=step_size)
     initial_K = initial_result.K
 
@@ -789,7 +874,7 @@ def _linear_search_rvalue_by_K(
 
     for i in range(1, max_iters + 1):
         current_rvalue = initial_rvalue + i * major_step * direction
-        current_point = sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
+        current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
         current_result = calculate_K(mesh, current_point, Bm=Bm, step_size=step_size)
         current_K = current_result.K
 
@@ -822,7 +907,7 @@ def _linear_search_rvalue_by_K(
 
     for i in range(1, max_iters + 1):
         current_rvalue = minor_start_rvalue + i * minor_step * direction
-        current_point = sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
+        current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
         current_result = calculate_K(mesh, current_point, Bm=Bm, step_size=step_size)
         current_K = current_result.K
 
@@ -835,7 +920,7 @@ def _linear_search_rvalue_by_K(
         if in_interval:
             # Interpolate between upper and lower bounds to find final rvalue
             (final_rvalue,) = np.interp([target_K], history_K[-2:], history_rvalue[-2:])
-            final_point = sp2cart_point(r=final_rvalue, phi=-local_time, theta=0)
+            final_point = utils.sp2cart_point(r=final_rvalue, phi=-local_time, theta=0)
             final_result = calculate_K(mesh, final_point, Bm=Bm, step_size=step_size)
 
             return final_rvalue, final_result
