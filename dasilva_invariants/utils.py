@@ -7,8 +7,6 @@ from ai import cs
 from astropy import units
 import numpy as np
 import numpy.typing as npt
-import pyvista
-import vtk
 
 
 def nanoTesla2Gauss(nT_values: npt.ArrayLike) -> npt.NDArray:
@@ -96,28 +94,3 @@ def lfm_get_mer_slice(data):
     mer_c = np.append(mer_c.transpose(), [mer_c[:, 0]], axis=0).transpose()
 
     return mer_c
-
-
-def interpolate_mesh(
-    mesh: pyvista.StructuredGrid, point: Tuple[float, float, float], key: str = "B"
-):
-    """Linearly interpolate mesh to find value (such as magnetic field) at
-    given point.
-
-    Args
-      mesh: Grid and magnetic field, loaded using meshes module
-      point: Tuple of (x, y, z)
-      key: Name of the variable in the mesh to interpolate
-    Returns
-      Interpolated value of the mesh at given point.
-    """
-    points_search = pyvista.PolyData(np.array([point]))
-
-    interp = vtk.vtkPointInterpolator()  # linear interpolation
-    interp.SetInputData(points_search)
-    interp.SetSourceData(mesh)
-    interp.Update()
-
-    interp_result = pyvista.PolyData(interp.GetOutput())
-
-    return np.array(interp_result[key])[0]

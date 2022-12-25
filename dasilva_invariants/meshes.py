@@ -1,13 +1,12 @@
 """Tools for obtaining meshes for use in calculating invariants.
 
 Meshes are grids + magnetic field vectors at those grid points. They
-are instances of `pyvista.StructuredGrid`. PyVista is used throughout
-this project.
+are instances of :py:class:`~MagneticFieldModel`.
 
 In this module, all grids returned are in units of Re and all magnetic
 fields are in units of Gauss.
 """
-from typing import cast, Dict, List, Union, Tuple
+from typing import cast, Dict, List, Union, Optional, Tuple
 
 from ai import cs
 from astropy import constants, units
@@ -19,17 +18,138 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import pandas as pd
 from pyhdf.SD import SD, SDC
-import pyvista
-
-from .constants import EARTH_DIPOLE_B0
+from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import KDTree
+from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
 from .utils import nanoTesla2Gauss
 
 __all__ = [
+    "MagneticFieldModel",
     "get_dipole_mesh_on_lfm_grid",
     "get_lfm_hdf4_data",
     "get_tsyganenko_on_lfm_grid_with_auto_params",
     "get_tsyganenko_params",
 ]
+
+
+class MagneticFieldModel:
+    """Represents a magnetic field model, with methods for sampling the
+    magnetic field at an aribtrary point.
+
+    The `interp_method` can be changed after the object is created. For
+    calculating L* it is recommended to use "preprocess". In some limited
+    situations, if only K needs to be calculated, "kdtree" may be faster.
+    """
+
+    def __init__(
+        self,
+        x: NDArray[np.float64],
+        y: NDArray[np.float64],
+        z: NDArray[np.float64],
+        Bx: NDArray[np.float64],
+        By: NDArray[np.float64],
+        Bz: NDArray[np.float64],
+        inner_boundary: float,
+        interp_method: str = "preprocess",
+    ):
+        """ "Create a magnetic field model.
+
+        Parameters
+        ----------
+        x_grid : array of (m, n, p)
+            X coordinates of data, in SM coordiantes and units of Re
+        y_grid : array of (m, n, p)
+            Y coordinates of data, in SM coordiantes and units of Re
+        z_grid : array of (m, n, p)
+            Z coordinates of data, in SM coordiantes and units of Re
+        Bx : array of (m, n, p)
+            Magnetic field X component, in SM coordinates and units of Gauss
+        By : array of (m, n, p)
+            Magnetic field Y component, in SM coordinates and units of Gauss
+        Bz : array of (m, n, p)
+            Magnetic field Z component, in SM coordinates and units of Gauss
+        inner_boundary : float
+            Minimum radius to be considered too close to the earth for model to
+            cover.
+        interp_method : {'preprocess', 'kdtree'}, optional
+            Interpolation method. See class documentation for guidelines.
+
+        Raises
+        ------
+        ValueError
+            Invalid value for `interp_method` provided
+        """
+        self.x = x
+        self.y = y
+        self.z = z
+        self.Bx = Bx
+        self.By = By
+        self.Bz = Bz
+        self.inner_boundary = inner_boundary
+        self.interp_method = interp_method
+
+    @property
+    def interp_method(self) -> str:
+        """Set the interp_method attribute
+
+        Returns
+        -------
+        Interpolation method selected
+        """
+        return self._interp_method
+
+    @interp_method.setter
+    def interp_method(self, value: str) -> None:
+        """Set the interp_method attribute.
+
+        Parameters
+        ----------
+        value : {'preprocess', 'kdtree'}
+           New value for `interp_method`
+
+        Raises
+        ------
+        ValueError
+            Invalid value for `interp_method` provided
+        """
+        points = np.array([self.x.flatten(), self.y.flatten(), self.z.flatten()]).T
+
+        values = np.array([self.Bx.flatten(), self.By.flatten(), self.Bz.flatten()]).T
+
+        if value == "preprocess":
+            mask = np.linalg.norm(points, axis=1) < 15
+            self._interp = LinearNDInterpolator(points[mask], values[mask])
+        elif value == "kdtree":
+            _, inds = np.unique(points, return_index=True, axis=0)
+            self._kd_data = points[inds]
+            self._kd_fields = values[inds]
+            self._kd_tree = KDTree(self._kd_data)
+        else:
+            raise ValueError(f"Invalid value for interp_method {repr(value)}")
+
+        self._interp_method = value
+
+    def interpolate(self, point: Tuple[float, float, float]) -> Tuple[float]:
+        """Find the magnetic field at a given point
+
+        Parameters
+        ----------
+        point : tuple of float
+            Coordinates (x, y, z) to interpolate at. SM Coordinate system,
+            units of Re.
+        """
+        if self.interp_method == "preprocess":
+            as_tup = tuple(self._interp(point)[0])
+            return cast(Tuple[float], as_tup)
+        elif self.interp_method == "kdtree":
+            _, inds = self._kd_tree.query(point, 1000)
+            interp = LinearNDInterpolator(self._kd_data[inds], self._kd_fields[inds])
+            as_tup = tuple(interp(point)[0])
+            return cast(Tuple[float], as_tup)
+        else:
+            raise RuntimeError(
+                f"Invalid value for self._interp_method {self._interp_method}"
+            )
 
 
 def _fix_lfm_hdf4_array_order(data):
@@ -57,7 +177,7 @@ def _fix_lfm_hdf4_array_order(data):
     return data
 
 
-def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
+def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -68,7 +188,7 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
 
     Returns
     -------
-    mesh : `pyvista.StrucutredGrid`
+    mesh : :py:class:`~MagneticFieldModel`
         Mesh on LFM grid with dipole field values. Grid is in units of Re and
         magnetic field is is units of Gauss
     """
@@ -86,23 +206,15 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
     r_re = np.sqrt(x_re**2 + y_re**2 + z_re**2)
     n_points = r_re.size
 
-    B = np.empty((n_points, 3))
-    B[:, 0] = 3 * x_re * z_re * EARTH_DIPOLE_B0 / r_re**5
-    B[:, 1] = 3 * y_re * z_re * EARTH_DIPOLE_B0 / r_re**5
-    B[:, 2] = (3 * z_re**2 - r_re**2) * EARTH_DIPOLE_B0 / r_re**5
+    Bx = nanoTesla2Gauss(3 * x_re * z_re * EARTH_DIPOLE_B0 / r_re**5)
+    By = nanoTesla2Gauss(3 * y_re * z_re * EARTH_DIPOLE_B0 / r_re**5)
+    Bz = nanoTesla2Gauss((3 * z_re**2 - r_re**2) * EARTH_DIPOLE_B0 / r_re**5)
 
-    B = nanoTesla2Gauss(B)
-
-    # Create PyVista structured grid.
+    # Create magnetic field model
     # ------------------------------------------------------------------------
-    mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
-
-    _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid)
-
-    mesh.point_data["B"] = B
-
-    # Return output
-    return mesh
+    return MagneticFieldModel(
+        X_grid, Y_grid, Z_grid, Bx, By, Bz, inner_boundary=LFM_INNER_BOUNDARY
+    )
 
 
 def _get_fixed_lfm_grid_centers(
@@ -125,6 +237,12 @@ def _get_fixed_lfm_grid_centers(
     X_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("X_grid").get())
     Y_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Y_grid").get())
     Z_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Z_grid").get())
+
+    # X_grid_re = (X_grid_raw * units.cm).to(constants.R_earth).value  # type: ignore
+    # Y_grid_re = (Y_grid_raw * units.cm).to(constants.R_earth).value  # type: ignore
+    # Z_grid_re = (Z_grid_raw * units.cm).to(constants.R_earth).value  # type: ignore
+
+    # return X_grid_re, Y_grid_re, Z_grid_re
 
     # This code implements Josh Murphy's point2CellCenteredGrid() function
     # ------------------------------------------------------------------------
@@ -169,7 +287,7 @@ def _get_fixed_lfm_grid_centers(
     return X_grid_re, Y_grid_re, Z_grid_re
 
 
-def get_lfm_hdf4_data(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
+def get_lfm_hdf4_data(lfm_hdf4_path: str) -> MagneticFieldModel:
     """Get a magnetic field data + grid from LFM output. Uses an LFM HDF4 file.
 
     Parameters
@@ -179,7 +297,7 @@ def get_lfm_hdf4_data(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
 
     Returns
     --------
-    mesh : `pyvista.StrucutredGrid`
+    mesh : :py:class:`~MagneticFieldModel`
         Mesh on LFM grid with LFM magnetic field values. Grid is in units of Re
         and magnetic field is is units of Gauss
     """
@@ -195,47 +313,20 @@ def get_lfm_hdf4_data(lfm_hdf4_path: str) -> pyvista.StructuredGrid:
     By_raw = _fix_lfm_hdf4_array_order(hdf.select("by_").get())
     Bz_raw = _fix_lfm_hdf4_array_order(hdf.select("bz_").get())
 
+    # Bx, By, Bz = Bx_raw, By_raw, Bz_raw
     Bx, By, Bz = _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw)
 
-    # Create PyVista structured grid.
+    # Create Magnetic Field Model
     # ------------------------------------------------------------------------
-    mesh = pyvista.StructuredGrid(X_grid, Y_grid, Z_grid)
-
-    _add_spherical_coords_to_mesh(mesh, X_grid, Y_grid, Z_grid)
-
-    B = np.empty((mesh.n_points, 3))
-    B[:, 0] = Bx.flatten(order="F")
-    B[:, 1] = By.flatten(order="F")
-    B[:, 2] = Bz.flatten(order="F")
-
-    mesh.point_data["B"] = B
-
-    return mesh
-
-
-def _add_spherical_coords_to_mesh(
-    mesh: pyvista.StructuredGrid,
-    X_grid: NDArray[np.float64],
-    Y_grid: NDArray[np.float64],
-    Z_grid: NDArray[np.float64],
-):
-    """Add pre-compute spherical coordinates of grid to mesh in place.
-
-    Parameters
-    ----------
-    mesh : `pyvista.StructuredGrid`
-        Mesh to add to spherical coordinates to
-    X_grid : NDArray[np.float64]
-        Three-dimensional grid of X coordinates
-    Y_grid : NDArray[np.float64]
-        Three-dimensional grid of Y coordinates
-    Z_grid : NDArray[np.float64]
-        Three-dimensional grid of Z coordinates
-    """
-    R_grid, Theta_grid, Phi_grid = cs.cart2sp(X_grid, Y_grid, Z_grid)
-    mesh.point_data["R_grid"] = R_grid.flatten(order="F")
-    mesh.point_data["Phi_grid"] = Phi_grid.flatten(order="F")
-    mesh.point_data["Theta_grid"] = Theta_grid.flatten(order="F")
+    return MagneticFieldModel(
+        X_grid,
+        Y_grid,
+        Z_grid,
+        Bx,
+        By,
+        Bz,
+        inner_boundary=LFM_INNER_BOUNDARY,
+    )
 
 
 def _apply_murphy_lfm_grid_patch(
@@ -298,7 +389,7 @@ def _calc_cell_centers(A: NDArray[np.float64]) -> NDArray[np.float64]:
 
     Returns
     -------
-    centers : NDarray[np.float64][
+    centers : NDArray[np.float64]
         3D array of X, Y, or Z positions for grid coordinates
     """
     s = A.shape
@@ -328,7 +419,7 @@ def _get_tsyganenko_on_lfm_grid(
     time: datetime,
     lfm_hdf4_path: str,
     external_field_only: bool = False,
-) -> pyvista.StructuredGrid:
+) -> MagneticFieldModel:
     """Internal helper function to get one of the tsyganenko fields on an LFM grid.
 
     Parameters
@@ -348,7 +439,7 @@ def _get_tsyganenko_on_lfm_grid(
 
     Returns
     -------
-    mesh : `pyvista.StrucutredGrid`
+    mesh : :py:class:`~MagneticFieldModel`
         Magnetic model on LFM grid with dipole field values. Grid is in units of
         Re and magnetic field is is units of Gauss.
     """
@@ -407,20 +498,17 @@ def _get_tsyganenko_on_lfm_grid(
         By -= By_int
         Bz -= Bz_int
 
-    # Create PyVista structured grid.
+    # Create magnetic field model
     # ------------------------------------------------------------------------
-    mesh = pyvista.StructuredGrid(X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid)
-
-    _add_spherical_coords_to_mesh(mesh, X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid)
-
-    B = np.empty((mesh.n_points, 3))
-    B[:, 0] = Bx
-    B[:, 1] = By
-    B[:, 2] = Bz
-    mesh.point_data["B"] = B
-
-    # Return output
-    return mesh
+    return MagneticFieldModel(
+        X_re_sm_grid,
+        Y_re_sm_grid,
+        Z_re_sm_grid,
+        Bx,
+        Bz,
+        Bz,
+        inner_boundary=LFM_INNER_BOUNDARY,
+    )
 
 
 def get_tsyganenko_params(
@@ -537,7 +625,7 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(
     param_path: str,
     tell_params: bool = True,
     **kwargs,
-) -> pyvista.StructuredGrid:
+) -> MagneticFieldModel:
     """Get a Tsyganenko field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -560,13 +648,10 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(
         Force a zero tilt when calculating the magnetic field
     n_jobs : int, optional
         Number of parallel processes to use (-1 for all available cores)
-    verbose : bool
-        Verbosity level to use with Parallel processing (see `joblib.Parallel`
-        documentation)
 
     Returns
     -------
-    mesh : `pyvista.StrucutredGrid`
+    mesh : :py:class:`~MagneticFieldModel`
         Tsyganenko magnetic field model on LFM grid. Grid is in units of Re and magnetic
         field is is units of Gauss.
     """

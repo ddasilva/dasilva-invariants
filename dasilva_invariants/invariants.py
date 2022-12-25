@@ -7,14 +7,17 @@ processing.
 """
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+import sys
 
 from ai import cs
 import numpy as np
 from numpy.typing import NDArray
-import pyvista
 from scipy import interpolate
+from scipy.integrate import RK45
 
 from . import utils
+from .meshes import MagneticFieldModel
+
 
 __all__ = [
     "CalculateKResult",
@@ -26,6 +29,23 @@ __all__ = [
     "DriftShellLinearSearchDoesntConverge",
     "DriftShellBisectionDoesntConverge",
 ]
+
+
+@dataclass
+class FieldLineTrace:
+    """Class to hold the results of a field line trace.
+
+    Parameters
+    ----------
+    points : array
+       Positions along field line trace, in SM coordinate system and units of Re
+    B : array
+       Magnetic field vector along field line trace, in SM coordinates and units
+       of Gauss
+    """
+
+    points: NDArray[np.float64]
+    B: NDArray[np.float64]
 
 
 @dataclass
@@ -78,7 +98,7 @@ class CalculateKResult:
     integral_axis_latitude: NDArray[np.float64]
     integral_integrand: NDArray[np.float64]
 
-    _trace: pyvista.core.pointset.PolyData
+    _trace: FieldLineTrace
 
 
 @dataclass
@@ -157,13 +177,13 @@ class DriftShellBisectionDoesntConverge(DriftShellSearchDoesntConverge):
 
 
 def calculate_K(
-    mesh: pyvista.StructuredGrid,
+    mesh: MagneticFieldModel,
     starting_point: Tuple[float, float, float],
     mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
     pitch_angle: Optional[float] = None,
     step_size: Optional[float] = None,
-    reuse_trace: Optional[pyvista.core.pointset.PolyData] = None,
+    reuse_trace: Optional[FieldLineTrace] = None,
 ) -> CalculateKResult:
     """Calculate the third adiabatic invariant, K.
 
@@ -171,10 +191,10 @@ def calculate_K(
 
     Parameters
     ----------
-    mesh : pyvista.StructuredGrid
+    mesh : MagneticFieldModel
         Grid and magnetic field, loaded using meshes module
     starting_point : tuple of floats
-        Starting point of the field line integration, as (x, y, z) tuple of
+        Starting point of the field line trace, as (x, y, z) tuple of
         floats, in units of Re.
     mirror_latitude : float, optional
         Magnetic latitude in degrees to use for the mirroring point, to
@@ -184,6 +204,8 @@ def calculate_K(
     pitch_angle : float, optional
         Local pitch angle at starting point, to specify the bounce path. In
         units of degrees
+    step_size ; float, optional
+        Step size to use with the field line trace
 
     Returns
     -------
@@ -214,38 +236,22 @@ def calculate_K(
     # Calculate field line trace
     # ------------------------------------------------------------------------
     if step_size is None:
-        max_step_length = 1e-2
-        min_step_length = 1e-2
-        initial_step_length = 1e-2
-    else:
-        max_step_length = step_size
-        min_step_length = step_size
-        initial_step_length = step_size
+        step_size = 1e-1
 
     if reuse_trace is None:
-        trace = mesh.streamlines(
-            "B",
-            start_position=starting_point,
-            terminal_speed=0.0,
-            max_step_length=max_step_length,
-            min_step_length=min_step_length,
-            initial_step_length=initial_step_length,
-            step_unit="l",
-            max_steps=1_000_000,
-            interpolator_type="c",
-        )
-    else:
-        trace = reuse_trace
+        trace = trace_field_line(mesh, starting_point, step_size)
 
-    if trace.n_points == 0:
+    if len(trace.points) == 0:
         r = np.linalg.norm(starting_point)
         raise FieldLineTraceInsufficient(
             f"Trace returned empty from {starting_point}, r={r:.1f}"
         )
-    if trace.n_points < 50:
-        raise FieldLineTraceInsufficient(f"Trace too small ({trace.n_points} points)")
+    if len(trace.points) < 50:
+        raise FieldLineTraceInsufficient(
+            f"Trace too small ({len(trace.points)} points)"
+        )
 
-    trace_field_strength = np.linalg.norm(trace["B"], axis=1)
+    trace_field_strength = np.linalg.norm(trace.B, axis=1)
 
     # Get the trace latitudes and Bm if not specified
     # ------------------------------------------------------------------------
@@ -262,7 +268,7 @@ def calculate_K(
             xp=trace_latitude[trace_sorter],
             fp=trace_field_strength[trace_sorter],
         )
-    if pitch_angle is not None:
+    elif pitch_angle is not None:
         tmp = np.array([pitch_angle])
         (Bm,) = Bmin / np.sin(np.deg2rad(tmp)) ** 2
     elif Bm is None:
@@ -315,7 +321,7 @@ def calculate_K(
 
 
 def calculate_LStar(
-    mesh: pyvista.StructuredGrid,
+    mesh: MagneticFieldModel,
     starting_point: Tuple[float, float, float],
     mode: str = "linear",
     num_local_times: int = 4,
@@ -339,7 +345,7 @@ def calculate_LStar(
 
     Parameters
     ----------
-    mesh : pyvista.StructuredGrid
+    mesh : :py:class:`~MagneticFieldModel`
         grid and magnetic field, loaded using meshes module
     starting_point : tuple of floats
         Starting point of the field line integration, as
@@ -496,7 +502,7 @@ def calculate_LStar(
     # This method assumes a dipole below the innery boundary, and integrates
     # around the local times using stokes law with B = curl A.
     # -----------------------------------------------------------------------
-    inner_rvalue = np.linalg.norm(mesh.points, axis=1).min()
+    inner_rvalue = mesh.inner_boundary
     surface_rvalue = 1
 
     trace_north_latitudes = np.array(
@@ -556,8 +562,86 @@ def calculate_LStar(
     )
 
 
+def trace_field_line(
+    mesh: MagneticFieldModel,
+    starting_point: Tuple[float, float, float],
+    step_size: float,
+) -> FieldLineTrace:
+    """ "Perform a field line trace. Implements RK45 in both directions, stopping
+    when `mesh.innery_boundary` is crossed.
+
+    Parameters
+    ----------
+    mesh : MagneticFieldModel
+        Grid and magnetic field, loaded using meshes module
+    starting_point : tuple of floats
+        Starting point of the field line trace, as (x, y, z) tuple of
+        floats, in units of Re.
+    step_size : float, optional
+        Step size to use with the field line trace
+
+    Returns
+    -------
+    trace : :py:class:`FieldLineTrace`
+        Coordinates and magnetic field vector along the field line trace
+    """
+
+    def _fun(t, y):
+        B = mesh.interpolate(y)
+        direction = B / np.linalg.norm(B)
+        return direction
+
+    # Integrate forwards ----------------------------------------------------
+    rk45 = RK45(
+        _fun,
+        t0=0,
+        y0=starting_point,
+        first_step=step_size,
+        max_step=step_size,
+        t_bound=sys.float_info.max,
+    )
+
+    forward_points = [starting_point]
+
+    while True:
+        rk45.step()
+        next_point = rk45.y
+        # print(next_point)
+        if np.linalg.norm(next_point) < mesh.inner_boundary:
+            break
+        forward_points.append(next_point)
+
+    # Integrate backwards ----------------------------------------------------
+    rk45 = RK45(
+        _fun,
+        t0=0,
+        y0=starting_point,
+        first_step=step_size,
+        max_step=step_size,
+        t_bound=-sys.float_info.max,
+    )
+
+    backward_points = [starting_point]
+
+    while True:
+        rk45.step()
+        next_point = rk45.y
+        # print(next_point)
+        if np.linalg.norm(next_point) < mesh.inner_boundary:
+            break
+        backward_points.append(next_point)
+
+    # return FieldLineTrace object  ------------------------------------------
+    points = np.array(backward_points + forward_points)
+    B = np.array([mesh.interpolate(point) for point in points])
+
+    trace = FieldLineTrace(points=points, B=B)
+
+    return trace
+
+
 def _bisect_rvalue_by_K(
-    mesh: pyvista.StructuredGrid,
+    mesh: MagneticFieldModel,
     target_K: float,
     Bm: float,
     starting_rvalue: float,
@@ -572,29 +656,43 @@ def _bisect_rvalue_by_K(
     is sufficiently small or interval being searched is sufficiently small to
     interpolate.
 
-    Args
-      target_K: floating point K value to search for (float)
-      Bm: magnetic mirroring point; parameter used to estimte K (float)
-      starting_rvalue: starting point rvalue (float)
-      local_time: starting local time (radians, float)
-      max_iters: Maximum number of iterations before erroring out (int)
-      interval_size_threshold: bisection threshold before linearly
-        interpolating
-      rel_error_threshold: Relative error threshold to consider two K's equal
-        (float between [0, 1]).
-      mesh: reference to grid and magnetic field
+    Parameters
+    ----------
+    mesh : MagneticFieldModel
+        Grid and magnetic field, loaded using meshes module
+    target_K : float
+        K value to search for (float)
+    Bm : float
+        Magnetic mirroring point, parameter used to estimte K
+    starting_rvalue : float
+        Initial radius of search
+    local_time : float
+        Current local time in radians
+    max_iters : int
+        Maximum number of iterations before erroring out (int)
+    interval_size_threshold : float
+        Bisection threshold before linearly interpolating
+    rel_error_threshold : float
+        Relative error threshold to consider two K's equal, between [0, 1]
+
     Returns
-      rvalue: radius at given local time which produces the same K on
-        the given mesh (float)
-      calculate_K_result: instance of CalculateKResult corresponding to
-        radius and calculate_K().
+    -------
+    rvalue : float
+        Radius at given local time which produces the same K on he given
+        mesh
+    calculate_K_result : :py:class:`~CalculateKResult`
+        Value of K and field line trac information corresponding to final field
+        line
+
     Raises
-      DriftShellBisectionDoesntConverge: maximum number of iterations reached
+    -------
+    DriftShellBisectionDoesntConverge
+        Maximum number of iterations reached
     """
     # Perform bisection method searching for K(Bm, r)
     # ------------------------------------------------------------------------
     upper_rvalue = starting_rvalue * 2
-    lower_rvalue = np.linalg.norm(mesh.points, axis=1).min()
+    lower_rvalue = mesh.inner_boundary
     current_rvalue = starting_rvalue
     history = []
 
@@ -679,7 +777,7 @@ def _bisect_rvalue_by_K(
 
 
 def _linear_search_rvalue_by_Bmin(
-    mesh: pyvista.StructuredGrid,
+    mesh: MagneticFieldModel,
     target_Bmin: float,
     initial_rvalue: float,
     local_time: float,
@@ -810,7 +908,7 @@ def _linear_search_rvalue_by_Bmin(
 
 
 def _linear_search_rvalue_by_K(
-    mesh: pyvista.StructuredGrid,
+    mesh: MagneticFieldModel,
     target_K: float,
     Bm: float,
     initial_rvalue: float,

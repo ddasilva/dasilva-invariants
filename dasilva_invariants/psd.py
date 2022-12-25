@@ -8,12 +8,11 @@ from astropy.constants import R_earth, m_e, m_p, c
 from astropy import units
 import numpy as np
 from numpy.typing import NDArray
-import pyvista
 from scipy.stats import linregress
 
 from .insitu import InSituObservation
 from .invariants import calculate_K, calculate_LStar, CalculateLStarResult
-from .utils import interpolate_mesh
+from .meshes import MagneticFieldModel
 
 __all__ = ["CalculateLStarProfileResult", "calculate_LStar_profile"]
 
@@ -53,7 +52,7 @@ def calculate_LStar_profile(
     fixed_mu: float,
     fixed_K: float,
     insitu_observation: InSituObservation,
-    mesh: pyvista.StructuredGrid,
+    mesh: MagneticFieldModel,
     particle: str = "electron",
     calculate_lstar_kwargs: Dict[Any, Any] = {},
 ) -> CalculateLStarProfileResult:
@@ -140,7 +139,7 @@ def calculate_LStar_profile(
     # Solve the quadratic equation, taking real root. See Green 2004 (Journal of
     # Geophysical Research), Step 3.
     # ------------------------------------------------------------------------
-    B = np.linalg.norm(interpolate_mesh(mesh, insitu_observation.sc_position))
+    B = np.linalg.norm(mesh.interpolate(insitu_observation.sc_position))
     B *= units.G
     fixed_mu_units = fixed_mu * units.MeV / units.G
     fixed_pitch_angle_rad = np.deg2rad(fixed_pitch_angle)
