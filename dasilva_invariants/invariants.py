@@ -318,7 +318,7 @@ def calculate_LStar(
     mesh: pyvista.StructuredGrid,
     starting_point: Tuple[float, float, float],
     mode: str = "linear",
-    num_local_times: int = 16,
+    num_local_times: int = 4,
     starting_mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
     starting_pitch_angle: Optional[float] = None,

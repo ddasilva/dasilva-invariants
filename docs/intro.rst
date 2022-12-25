@@ -1,5 +1,5 @@
-Introudction to Method
-============================================
+Introduction to Method
+======================
 
 Background
 ----------
