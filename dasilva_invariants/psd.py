@@ -27,9 +27,8 @@ class CalculateLStarProfileResult:
        Phase space density at corresponding L*, in units of (c / (cm*MeV))**3
     LStar : float
        LStar corresponding to phase space density, unitless
-    lstar_result : :py:class:`~CalculateLStarResult`
-       Result from `:py:func:`dasilva_invariants.invariants.calculate_LStar`
-       which fully specifies the drift shell
+    lstar_result : :py:class:`~dasilva_invariants.invariants.CalculateLStarResult`
+       Result which fully specifies the drift shell
     fixed_mu : float
        Fixed first adiabatic invariant used in this calculation, units of
        MeV/G

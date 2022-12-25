@@ -191,7 +191,7 @@ def calculate_K(
 
     Parameters
     ----------
-    mesh : MagneticFieldModel
+    mesh : :py:class:`~MagneticFieldModel`
         Grid and magnetic field, loaded using meshes module
     starting_point : tuple of floats
         Starting point of the field line trace, as (x, y, z) tuple of
@@ -572,7 +572,7 @@ def trace_field_line(
 
     Parameters
     ----------
-    mesh : MagneticFieldModel
+    mesh : :py:class:`~MagneticFieldModel`
         Grid and magnetic field, loaded using meshes module
     starting_point : tuple of floats
         Starting point of the field line trace, as (x, y, z) tuple of
@@ -658,7 +658,7 @@ def _bisect_rvalue_by_K(
 
     Parameters
     ----------
-    mesh : MagneticFieldModel
+    mesh : :py:class:`~MagneticFieldModel`
         Grid and magnetic field, loaded using meshes module
     target_K : float
         K value to search for (float)
