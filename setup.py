@@ -38,13 +38,14 @@ setup(
     ],
     install_requires=[
         "ai.cs",
-        "astropy",
-        "flake8"
+        "astropy>=5.1",
+        "flake8",
         "mypy",
-        "numpy",
-        "pandas",
-        "pyhdf"        
-        "scipy",
+        "numpy>=1.24",
+        "pandas>=1.5.2",
+        "PyGeopack",
+        "pyhdf" ,
+        "scipy>=1.9.3",
         "spacepy",
         "types-python-dateutil",
     ]
