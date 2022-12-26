@@ -13,7 +13,7 @@ To install this package, you can use
 
 .. code::
 
-   conda install -c conda-forge dasilva-invariants
+   pip install dasilva-invariants
 
 Calculating L* from TS05
 ------------------------
@@ -39,7 +39,7 @@ Below is code which calculates L* using the magnetic fields obtain from TS05 and
             starting_pitch_angle=60
         )
     except invariants.DriftShellSearchDoesntConverge as e:
-        ("Unable to calculate drift shell; may not exist.")
+        print("Unable to calculate drift shell; may not exist.")
 	raise SystemExit(1)
 
     print(f"L* = {result.LStar}")
