@@ -3,7 +3,7 @@ from satellite missions. Data loaded through this module is then used with
 the phase space density module, :py:mod:`~dasilva_invariants.psd`.
 """
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Tuple
 
 from astropy import units
@@ -59,8 +59,10 @@ def get_rbsp_electron_level3(hdf_path) -> List[InSituObservation]:
     """
     # Load variables ---------------------------------------------------------
     cdf = cdflib.CDF(hdf_path)
-
-    times = cdf.varget("Epoch")
+    times = np.array([
+        datetime(1, 1, 1) + timedelta(days=-1, milliseconds=dt)
+        for dt in cdf.varget("Epoch")
+    ])
     energies = cdf.varget("FEDU_Energy") * 1000  # keV -> eV
     flux = cdf.varget("FEDU")
     pitch_angles = cdf.varget("FEDU_Alpha")

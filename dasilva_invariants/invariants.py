@@ -240,6 +240,8 @@ def calculate_K(
 
     if reuse_trace is None:
         trace = trace_field_line(mesh, starting_point, step_size)
+    else:
+        trace = reuse_trace
 
     if len(trace.points) == 0:
         r = np.linalg.norm(starting_point)

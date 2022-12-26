@@ -12,14 +12,17 @@ from ai import cs
 from astropy import constants, units
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-import PyGeopack as gp
+
+import h5py
 from matplotlib.dates import date2num
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import pandas as pd
+import PyGeopack as gp
 from pyhdf.SD import SD, SDC
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import KDTree
+
 from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
 from .utils import nanoTesla2Gauss
 
@@ -139,17 +142,38 @@ class MagneticFieldModel:
             units of Re.
         """
         if self.interp_method == "preprocess":
-            as_tup = tuple(self._interp(point)[0])
+            as_tup = tuple(self._interp([point])[0])
             return cast(Tuple[float], as_tup)
         elif self.interp_method == "kdtree":
-            _, inds = self._kd_tree.query(point, 1000)
+            _, inds = self._kd_tree.query([point], 1000)
             interp = LinearNDInterpolator(self._kd_data[inds], self._kd_fields[inds])
             as_tup = tuple(interp(point)[0])
-            return cast(Tuple[float], as_tup)
         else:
             raise RuntimeError(
                 f"Invalid value for self._interp_method {self._interp_method}"
             )
+
+        return cast(Tuple[float], as_tup)
+
+    def save(self, path):
+        hdf = h5py.File(path, 'w')
+        hdf['x'] = self.x
+        hdf['y'] = self.y
+        hdf['z']  = self.z
+        hdf['Bx'] = self.Bx
+        hdf['By'] = self.By
+        hdf['Bz'] = self.Bz
+        hdf['inner_boundary'] = [self.inner_boundary]
+        hdf.close()
+
+    @classmethod
+    def read(cls, path):
+        hdf = h5py.File(path, 'r')
+        x, y, z = hdf['x'][:], hdf['y'][:], hdf['z'][:]
+        Bx, By, Bz = hdf['Bx'][:], hdf['By'][:], hdf['Bz'][:]
+        inner_boundary = hdf['inner_boundary'][0]
+        hdf.close()
+        return cls(x, y, z, Bx, By, Bz, inner_boundary=inner_boundary)
 
 
 def _fix_lfm_hdf4_array_order(data):
