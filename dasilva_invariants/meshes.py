@@ -11,6 +11,7 @@ from typing import cast, Dict, List, Union, Optional, Tuple
 from ai import cs
 from astropy import constants, units
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from matplotlib.dates import date2num
@@ -19,6 +20,7 @@ from numpy.typing import ArrayLike, NDArray
 import pandas as pd
 import PyGeopack as gp
 from pyhdf.SD import SD, SDC
+import pyvista
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import KDTree
 
@@ -27,6 +29,7 @@ from .utils import nanoTesla2Gauss
 
 __all__ = [
     "MagneticFieldModel",
+    "FieldLineTrace",
     "get_dipole_mesh_on_lfm_grid",
     "get_lfm_hdf4_data",
     "get_tsyganenko_on_lfm_grid_with_auto_params",
@@ -34,13 +37,25 @@ __all__ = [
 ]
 
 
+@dataclass
+class FieldLineTrace:
+    """Class to hold the results of a field line trace.
+
+    Parameters
+    ----------
+    points : array, shape (n, 3)
+       Positions along field line trace, in SM coordinate system and units of Re
+    B : array, shape (n, 3)
+       Magnetic field vector along field line trace, in SM coordinates and units
+       of Gauss
+    """
+    points: NDArray[np.float64]
+    B: NDArray[np.float64]
+
+
 class MagneticFieldModel:
     """Represents a magnetic field model, with methods for sampling the
     magnetic field at an aribtrary point.
-
-    The `interp_method` can be changed after the object is created. For
-    calculating L* it is recommended to use "preprocess". In some limited
-    situations, if only K needs to be calculated, "kdtree" may be faster.
     """
 
     def __init__(
@@ -52,9 +67,8 @@ class MagneticFieldModel:
         By: NDArray[np.float64],
         Bz: NDArray[np.float64],
         inner_boundary: float,
-        interp_method: str = "preprocess",
     ):
-        """ "Create a magnetic field model.
+        """Create a magnetic field model.
 
         Parameters
         ----------
@@ -73,13 +87,6 @@ class MagneticFieldModel:
         inner_boundary : float
             Minimum radius to be considered too close to the earth for model to
             cover.
-        interp_method : {'preprocess', 'kdtree'}, optional
-            Interpolation method. See class documentation for guidelines.
-
-        Raises
-        ------
-        ValueError
-            Invalid value for `interp_method` provided
         """
         self.x = x
         self.y = y
@@ -88,54 +95,50 @@ class MagneticFieldModel:
         self.By = By
         self.Bz = Bz
         self.inner_boundary = inner_boundary
-        self.interp_method = interp_method
 
-    @property
-    def interp_method(self) -> str:
-        """Controls the interpolation method used. 
+        B = np.empty((Bx.size, 3))
+        B[:, 0] = Bx.flatten(order='F')
+        B[:, 1] = By.flatten(order='F')
+        B[:, 2] = Bz.flatten(order='F')
+        self._mesh = pyvista.StructuredGrid(x, y, z)
+        self._mesh.point_data['B'] = B
+
+    def trace_field_line(
+        self, starting_point: Tuple[float, float, float],
+        step_size: float
+    ) -> FieldLineTrace:
+        """Perform a field line trace. Implements RK45 in both directions,
+        stopping when outside the grid.
+
+        Parameters
+        ----------
+        starting_point : tuple of floats
+            Starting point of the field line trace, as (x, y, z) tuple of
+            floats, in units of Re.
+        step_size : float, optional
+            Step size to use with the field line trace
 
         Returns
         -------
-        Interpolation method selected
+        trace : :py:class:`FieldLineTrace`
+            Coordinates and magnetic field vector along the field line trace
         """
-        return self._interp_method
-
-    @interp_method.setter
-    def interp_method(self, value: str) -> None:
-        """Controls the interpolation method used.
-
-        Parameters
-        ----------
-        value : {'preprocess', 'kdtree'}
-           New value for `interp_method`
-
-        Raises
-        ------
-        ValueError
-            Invalid value for `interp_method` provided
-        """
-        points = np.array([self.x.flatten(), self.y.flatten(), self.z.flatten()]).T
-        values = np.array([self.Bx.flatten(), self.By.flatten(), self.Bz.flatten()]).T
-
-        if value == "preprocess":
-            mask = np.linalg.norm(points, axis=1) < 30
-            self._interp = LinearNDInterpolator(points[mask], values[mask])
-            #self._interp = LinearNDInterpolator(points, values)
-        else:
-            raise ValueError(f"Invalid value for interp_method {repr(value)}")
-
-        self._interp_method = value
-
-    def interpolate(self, x: Tuple[float, float, float]) -> Tuple[float]:
-        """Find the magnetic field at a given point
-
-        Parameters
-        ----------
-        point : tuple of float
-            Coordinates (x, y, z) to interpolate at. SM Coordinate system,
-            units of Re.
-        """
-        return self._interp(x.T).T
+        pyvista_trace = self._mesh.streamlines(
+            "B",
+            start_position=starting_point,
+            terminal_speed=0.0,
+            max_step_length=step_size,
+            min_step_length=step_size,
+            initial_step_length=step_size,
+            step_unit="l",
+            max_steps=1_000_000,
+            interpolator_type="c"
+        )
+        
+        return FieldLineTrace(
+            points=pyvista_trace.points,
+            B=pyvista_trace['B']
+        )
 
 
 def _fix_lfm_hdf4_array_order(data):

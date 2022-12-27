@@ -16,7 +16,7 @@ from scipy import interpolate
 from scipy.integrate import RK45
 
 from . import utils
-from .meshes import MagneticFieldModel
+from .meshes import MagneticFieldModel, FieldLineTrace
 
 
 __all__ = [
@@ -30,22 +30,6 @@ __all__ = [
     "DriftShellBisectionDoesntConverge",
 ]
 
-
-@dataclass
-class FieldLineTrace:
-    """Class to hold the results of a field line trace.
-
-    Parameters
-    ----------
-    points : array
-       Positions along field line trace, in SM coordinate system and units of Re
-    B : array
-       Magnetic field vector along field line trace, in SM coordinates and units
-       of Gauss
-    """
-
-    points: NDArray[np.float64]
-    B: NDArray[np.float64]
 
 
 @dataclass
@@ -239,13 +223,7 @@ def calculate_K(
         step_size = 1e-3
 
     if reuse_trace is None:
-        try:
-            trace = trace_field_line(
-                mesh, starting_point, step_size, Bm=Bm
-            )
-        except RuntimeError as e:
-            print(e)        
-            raise FieldLineTraceInsufficient("Trace failed")
+        trace = mesh.trace_field_line(starting_point, step_size)
     else:
         trace = reuse_trace
 
@@ -254,11 +232,11 @@ def calculate_K(
         raise FieldLineTraceInsufficient(
             f"Trace returned empty from {starting_point}, r={r:.1f}"
         )
-    # if len(trace.points) < 50:
-    #     print('too small')
-    #     raise FieldLineTraceInsufficient(
-    #         f"Trace too small ({len(trace.points)} points)"
-    #     )
+
+    if len(trace.points) < 50:
+        raise FieldLineTraceInsufficient(
+            f"Trace too small ({len(trace.points)} points)"
+        )
 
     trace_field_strength = np.linalg.norm(trace.B, axis=1)
 
@@ -502,15 +480,11 @@ def calculate_LStar(
     # drift_local_times
     drift_rvalues: List[float] = []
     drift_K_results: List[CalculateKResult] = []
-    drift_north_lats: List[float] = []
     
     for i, (tmp_rvalue, tmp_result) in enumerate(drift_shell_results):
         drift_rvalues.append(tmp_rvalue)
         drift_K_results.append(tmp_result)
         
-        full_trace_K = calculate_K(mesh, tmp_result.starting_point, pitch_angle=90)
-        drift_north_lats.append(full_trace_K.trace_latitude.max())
-
     # Calculate L*
     # This method assumes a dipole below the innery boundary, and integrates
     # around the local times using stokes law with B = curl A.
@@ -518,10 +492,9 @@ def calculate_LStar(
     inner_rvalue = mesh.inner_boundary
     surface_rvalue = 1
 
-    trace_north_latitudes = np.array(drift_north_lats)
-    # trace_north_latitudes = np.array(
-    #     [result.trace_latitude.max() for result in drift_K_results], dtype=float
-    # )
+    trace_north_latitudes = np.array(
+        [result.trace_latitude.max() for result in drift_K_results], dtype=float
+    )
 
     if interp_local_times:
         # Interpolate with cubic spline with periodic boundary condition
@@ -576,103 +549,6 @@ def calculate_LStar(
     )
 
 
-def trace_field_line(
-    mesh: MagneticFieldModel,
-    starting_point: Tuple[float, float, float],
-    step_size: float,
-    Bm : Optional[float],
-) -> FieldLineTrace:
-    """ "Perform a field line trace. Implements RK45 in both directions, stopping
-    when `mesh.innery_boundary` is crossed.
-
-    Parameters
-    ----------
-    mesh : :py:class:`~MagneticFieldModel`
-        Grid and magnetic field, loaded using meshes module
-    starting_point : tuple of floats
-        Starting point of the field line trace, as (x, y, z) tuple of
-        floats, in units of Re.
-    step_size : float, optional
-        Step size to use with the field line trace
-
-    Returns
-    -------
-    trace : :py:class:`FieldLineTrace`
-        Coordinates and magnetic field vector along the field line trace
-    """
-    def _fun(t, y):
-        B = mesh.interpolate(y)
-        if np.isnan(B).any():
-            raise RuntimeError(f'Found NaN at {y}; started at {starting_point}')
-        direction = B / np.linalg.norm(B, axis=0)
-        return direction
-
-    kwargs = dict(
-        t0=0,
-        y0=starting_point,
-        first_step=step_size,
-        max_step=step_size,
-        vectorized=True,
-        rtol=np.inf,
-        atol=np.inf,
-    )
-
-    # Integrate forwards ----------------------------------------------------
-    rk45 = RK45(
-        _fun,
-        t_bound=sys.float_info.max,
-        **kwargs
-    )
-
-    starting_B = mesh.interpolate(np.array([starting_point]).T).T[0]
-    
-    trace_points = [starting_point]
-    trace_B = [starting_B]
-    
-    while True:
-        rk45.step()
-        next_point = rk45.y
-
-        r = np.linalg.norm(next_point)
-        B, = mesh.interpolate(np.array([next_point]).T).T
-        Bmag = np.linalg.norm(B)
-        
-        if r < mesh.inner_boundary:
-            break
-        if Bm is not None and Bmag > Bm:
-            break
-        trace_points.append(next_point)
-        trace_B.append(B)
-
-    # Integrate backwards ----------------------------------------------------
-    rk45 = RK45(
-        _fun,
-        t_bound=-sys.float_info.max,
-        **kwargs
-    )
-    
-    while True:
-        rk45.step()
-        next_point = rk45.y
-
-        r = np.linalg.norm(next_point)
-        B, = mesh.interpolate(np.array([next_point]).T).T
-        Bmag = np.linalg.norm(B)
-        
-        if r < mesh.inner_boundary:
-            break
-        if Bm is not None and Bmag > Bm:
-            break
-        trace_points.append(next_point)
-        trace_B.append(B)
-
-    # return FieldLineTrace object  ------------------------------------------
-    points = np.array(trace_points)
-    B = np.array(trace_B)
-    
-    trace = FieldLineTrace(points=points, B=B)
-
-    return trace
 
 
 def _bisect_rvalue_by_K(

@@ -36,17 +36,4 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
-    install_requires=[
-        "ai.cs",
-        "astropy>=5.1",
-        "cdflib",
-        "flake8",
-        "mypy",
-        "numpy>=1.24",
-        "pandas>=1.5.2",
-        "PyGeopack",
-        "pyhdf" ,
-        "scipy>=1.9.3",
-        "types-python-dateutil",
-    ]
 )

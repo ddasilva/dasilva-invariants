@@ -1,9 +1,9 @@
 da Silva Invariants
 ===================
    
-.. note:: This package is under development and is not yet publically available.
+.. note:: This package is under development and is not yet publically available. This website is a preview and changes may exist between this and the final version.
 
-This package provides tools for radiation belt physicists to peform adiabiatic invariant analysis from magnetic field models of the Earth's magnetosphere. These parameters characterize three periodic motions associated with particles trapped in magnetospheres, and are used to study the dynamical system. For more information on the technique, see `Introduction to Method <intro.html>`_.
+This package provides tools for radiation belt physicists to peform adiabiatic invariant analysis from gridded magnetic field models of the Earth's magnetosphere. These parameters characterize three periodic motions associated with particles trapped in magnetospheres, and are used to study the dynamical system. For more information on the technique, see `Introduction to Method <intro.html>`_.
 
 This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, as well as the `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ MHD simulation code. Support for additional models is planned in the future.
 
@@ -13,7 +13,7 @@ To install this package, you can use
 
 .. code::
 
-   pip install dasilva-invariants
+   conda install -c conda-forge dasilva-invariants
 
 Calculating L* from TS05
 ------------------------
