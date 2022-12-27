@@ -13,7 +13,6 @@ from astropy import constants, units
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-import h5py
 from matplotlib.dates import date2num
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -93,7 +92,7 @@ class MagneticFieldModel:
 
     @property
     def interp_method(self) -> str:
-        """Set the interp_method attribute
+        """Controls the interpolation method used. 
 
         Returns
         -------
@@ -103,7 +102,7 @@ class MagneticFieldModel:
 
     @interp_method.setter
     def interp_method(self, value: str) -> None:
-        """Set the interp_method attribute.
+        """Controls the interpolation method used.
 
         Parameters
         ----------
@@ -116,23 +115,18 @@ class MagneticFieldModel:
             Invalid value for `interp_method` provided
         """
         points = np.array([self.x.flatten(), self.y.flatten(), self.z.flatten()]).T
-
         values = np.array([self.Bx.flatten(), self.By.flatten(), self.Bz.flatten()]).T
 
         if value == "preprocess":
-            mask = np.linalg.norm(points, axis=1) < 15
+            mask = np.linalg.norm(points, axis=1) < 30
             self._interp = LinearNDInterpolator(points[mask], values[mask])
-        elif value == "kdtree":
-            _, inds = np.unique(points, return_index=True, axis=0)
-            self._kd_data = points[inds]
-            self._kd_fields = values[inds]
-            self._kd_tree = KDTree(self._kd_data)
+            #self._interp = LinearNDInterpolator(points, values)
         else:
             raise ValueError(f"Invalid value for interp_method {repr(value)}")
 
         self._interp_method = value
 
-    def interpolate(self, point: Tuple[float, float, float]) -> Tuple[float]:
+    def interpolate(self, x: Tuple[float, float, float]) -> Tuple[float]:
         """Find the magnetic field at a given point
 
         Parameters
@@ -141,39 +135,7 @@ class MagneticFieldModel:
             Coordinates (x, y, z) to interpolate at. SM Coordinate system,
             units of Re.
         """
-        if self.interp_method == "preprocess":
-            as_tup = tuple(self._interp([point])[0])
-            return cast(Tuple[float], as_tup)
-        elif self.interp_method == "kdtree":
-            _, inds = self._kd_tree.query([point], 1000)
-            interp = LinearNDInterpolator(self._kd_data[inds], self._kd_fields[inds])
-            as_tup = tuple(interp(point)[0])
-        else:
-            raise RuntimeError(
-                f"Invalid value for self._interp_method {self._interp_method}"
-            )
-
-        return cast(Tuple[float], as_tup)
-
-    def save(self, path):
-        hdf = h5py.File(path, 'w')
-        hdf['x'] = self.x
-        hdf['y'] = self.y
-        hdf['z']  = self.z
-        hdf['Bx'] = self.Bx
-        hdf['By'] = self.By
-        hdf['Bz'] = self.Bz
-        hdf['inner_boundary'] = [self.inner_boundary]
-        hdf.close()
-
-    @classmethod
-    def read(cls, path):
-        hdf = h5py.File(path, 'r')
-        x, y, z = hdf['x'][:], hdf['y'][:], hdf['z'][:]
-        Bx, By, Bz = hdf['Bx'][:], hdf['By'][:], hdf['Bz'][:]
-        inner_boundary = hdf['inner_boundary'][0]
-        hdf.close()
-        return cls(x, y, z, Bx, By, Bz, inner_boundary=inner_boundary)
+        return self._interp(x.T).T
 
 
 def _fix_lfm_hdf4_array_order(data):
@@ -482,7 +444,7 @@ def _get_tsyganenko_on_lfm_grid(
     # ------------------------------------------------------------------------
     date = int(time.strftime("%Y%m%d"))
     ut = int(time.strftime("%H")) + time.minute / 60
-
+    
     gp_tmp = gp.ModelField(
         x_re_sm,
         y_re_sm,
