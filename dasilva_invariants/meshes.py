@@ -58,6 +58,24 @@ class FieldLineTrace:
 class MagneticFieldModel:
     """Represents a magnetic field model, with methods for sampling the
     magnetic field at an aribtrary point.
+
+    Attributes
+    ----------
+    x_grid : array of (m, n, p)
+        X coordinates of data, in SM coordiantes and units of Re
+    y_grid : array of (m, n, p)
+        Y coordinates of data, in SM coordiantes and units of Re
+    z_grid : array of (m, n, p)
+        Z coordinates of data, in SM coordiantes and units of Re
+    Bx : array of (m, n, p)
+        Magnetic field X component, in SM coordinates and units of Gauss
+    By : array of (m, n, p)
+        Magnetic field Y component, in SM coordinates and units of Gauss
+    Bz : array of (m, n, p)
+        Magnetic field Z component, in SM coordinates and units of Gauss
+    inner_boundary : float
+        Minimum radius to be considered too close to the earth for model to
+        cover.
     """
 
     def __init__(
@@ -70,26 +88,6 @@ class MagneticFieldModel:
         Bz: NDArray[np.float64],
         inner_boundary: float,
     ):
-        """Create a magnetic field model.
-
-        Parameters
-        ----------
-        x_grid : array of (m, n, p)
-            X coordinates of data, in SM coordiantes and units of Re
-        y_grid : array of (m, n, p)
-            Y coordinates of data, in SM coordiantes and units of Re
-        z_grid : array of (m, n, p)
-            Z coordinates of data, in SM coordiantes and units of Re
-        Bx : array of (m, n, p)
-            Magnetic field X component, in SM coordinates and units of Gauss
-        By : array of (m, n, p)
-            Magnetic field Y component, in SM coordinates and units of Gauss
-        Bz : array of (m, n, p)
-            Magnetic field Z component, in SM coordinates and units of Gauss
-        inner_boundary : float
-            Minimum radius to be considered too close to the earth for model to
-            cover.
-        """
         self.x = x
         self.y = y
         self.z = z
@@ -115,7 +113,7 @@ class MagneticFieldModel:
         ----------
         starting_point : tuple of floats
             Starting point of the field line trace, as (x, y, z) tuple of
-            floats, in units of Re.
+            floats, in units of Re. Trace will go in both directions.
         step_size : float, optional
             Step size to use with the field line trace
 
@@ -141,8 +139,7 @@ class MagneticFieldModel:
     def interpolate(
         self, point: Tuple[float, float, float]
     ) -> Tuple[float, float, float]:
-        """Linearly interpolate mesh to find value (such as magnetic field) at
-        given point.
+        """Linearly interpolate mesh to find magnetic field at given point.
 
         Parameters
         ----------

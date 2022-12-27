@@ -57,18 +57,27 @@ def calculate_LStar_profile(
 ) -> CalculateLStarProfileResult:
     """Calculation of f(L*) vs L* profiles at fixed mu and K.
 
-    Args
-      mu: Fixed first adiabatic invariant, units of MeV/G
-      K: Fixed second adiabatic invariant, units of sqrt(G) Re
-      insitu_observation: Observational data accompanying this measurement
-      mesh: Grid and magnetic field, loaded using meshes module
-      particle: Set the particle type, either 'electron' or 'proton'
-      calculate_lstart_kwargs: Dictionary of arguments to pass to
+    Parameters
+    ----------
+    mu : float
+        F ixed first adiabatic invariant, units of MeV/G
+    K : float
+        Fixed second adiabatic invariant, units of sqrt(G) Re
+    insitu_observation : :py:class:`~InSituObservation`
+        Observational data accompanying this measurement
+    mesh : :py:class:~MagneticFieldModel`
+        Grid and magnetic field, loaded using meshes module
+    particle : {'electron', 'proton'}
+        Set the particle type, either 'electron' or 'proton'
+    calculate_lstart_kwargs : dict
+        Dictionary of arguments to pass to
         calculate_LStar(). Use this to specify options such as mode
         or number of local times.
+
     Returns
-       result: instance of CalculateLStarResult, holding phase space density
-         observation paired with L*.
+    -------
+    result : `~CalculateLStarProfileResult`
+        Holds phase space density observation paired with L*.
     """
     assert particle in (
         "electron",
