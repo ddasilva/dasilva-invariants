@@ -31,7 +31,6 @@ __all__ = [
 ]
 
 
-
 @dataclass
 class CalculateKResult:
     """Class to hold the return value of calculate_K(). This class also provides
@@ -480,11 +479,11 @@ def calculate_LStar(
     # drift_local_times
     drift_rvalues: List[float] = []
     drift_K_results: List[CalculateKResult] = []
-    
+
     for i, (tmp_rvalue, tmp_result) in enumerate(drift_shell_results):
         drift_rvalues.append(tmp_rvalue)
         drift_K_results.append(tmp_result)
-        
+
     # Calculate L*
     # This method assumes a dipole below the innery boundary, and integrates
     # around the local times using stokes law with B = curl A.
@@ -533,9 +532,6 @@ def calculate_LStar(
     drift_rvalues_arr = np.array(drift_rvalues)
     drift_is_closed = _test_drift_is_closed(drift_rvalues_arr)
 
-    #if not drift_is_closed:
-    #    LStar = np.nan
-
     return CalculateLStarResult(
         LStar=LStar,
         drift_local_times=drift_local_times,
@@ -547,8 +543,6 @@ def calculate_LStar(
         integral_theta=integral_theta,
         integral_integrand=integral_integrand,
     )
-
-
 
 
 def _bisect_rvalue_by_K(

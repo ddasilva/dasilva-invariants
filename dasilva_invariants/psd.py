@@ -158,7 +158,7 @@ def calculate_LStar_profile(
     # A linear regression of two log-space variables is a power law relation
     # in linear space.
     fit_x = np.log10(energies[mask].to(units.keV).value)
-    fit_y = np.log10(f_step2[mask].value)
+    fit_y = np.log10(f_step2[mask].value)  # type: ignore
     fit = linregress(fit_x, fit_y)
 
     fixed_E_unitless = fixed_E.to(units.keV).value

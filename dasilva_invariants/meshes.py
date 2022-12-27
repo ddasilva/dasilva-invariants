@@ -6,7 +6,7 @@ are instances of :py:class:`~MagneticFieldModel`.
 In this module, all grids returned are in units of Re and all magnetic
 fields are in units of Gauss.
 """
-from typing import cast, Dict, List, Union, Optional, Tuple
+from typing import cast, Dict, List, Optional, Tuple, Union
 
 from ai import cs
 from astropy import constants, units
@@ -23,6 +23,7 @@ from pyhdf.SD import SD, SDC
 import pyvista
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import KDTree
+import vtk
 
 from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
 from .utils import nanoTesla2Gauss
@@ -49,6 +50,7 @@ class FieldLineTrace:
        Magnetic field vector along field line trace, in SM coordinates and units
        of Gauss
     """
+
     points: NDArray[np.float64]
     B: NDArray[np.float64]
 
@@ -97,15 +99,14 @@ class MagneticFieldModel:
         self.inner_boundary = inner_boundary
 
         B = np.empty((Bx.size, 3))
-        B[:, 0] = Bx.flatten(order='F')
-        B[:, 1] = By.flatten(order='F')
-        B[:, 2] = Bz.flatten(order='F')
+        B[:, 0] = Bx.flatten(order="F")
+        B[:, 1] = By.flatten(order="F")
+        B[:, 2] = Bz.flatten(order="F")
         self._mesh = pyvista.StructuredGrid(x, y, z)
-        self._mesh.point_data['B'] = B
+        self._mesh.point_data["B"] = B
 
     def trace_field_line(
-        self, starting_point: Tuple[float, float, float],
-        step_size: float
+        self, starting_point: Tuple[float, float, float], step_size: float
     ) -> FieldLineTrace:
         """Perform a field line trace. Implements RK45 in both directions,
         stopping when outside the grid.
@@ -132,13 +133,39 @@ class MagneticFieldModel:
             initial_step_length=step_size,
             step_unit="l",
             max_steps=1_000_000,
-            interpolator_type="c"
+            interpolator_type="c",
         )
-        
-        return FieldLineTrace(
-            points=pyvista_trace.points,
-            B=pyvista_trace['B']
-        )
+
+        return FieldLineTrace(points=pyvista_trace.points, B=pyvista_trace["B"])
+
+    def interpolate(
+        self, point: Tuple[float, float, float]
+    ) -> Tuple[float, float, float]:
+        """Linearly interpolate mesh to find value (such as magnetic field) at
+        given point.
+
+        Parameters
+        ----------
+        point: tuple of floats
+           Position tuple of (x, y, z)
+
+        Returns
+        -------
+        B : tuple of floats
+            Interpolated value of the mesh at given point.
+        """
+        points_search = pyvista.PolyData(np.array([point]))
+
+        interp = vtk.vtkPointInterpolator()  # linear interpolation
+        interp.SetInputData(points_search)
+        interp.SetSourceData(self._mesh)
+        interp.Update()
+
+        interp_result = pyvista.PolyData(interp.GetOutput())
+        B = tuple(np.array(interp_result["B"])[0])
+        B = cast(Tuple[float, float, float], B)
+
+        return B
 
 
 def _fix_lfm_hdf4_array_order(data):
@@ -447,7 +474,7 @@ def _get_tsyganenko_on_lfm_grid(
     # ------------------------------------------------------------------------
     date = int(time.strftime("%Y%m%d"))
     ut = int(time.strftime("%H")) + time.minute / 60
-    
+
     gp_tmp = gp.ModelField(
         x_re_sm,
         y_re_sm,

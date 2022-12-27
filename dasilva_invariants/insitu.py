@@ -59,10 +59,12 @@ def get_rbsp_electron_level3(hdf_path) -> List[InSituObservation]:
     """
     # Load variables ---------------------------------------------------------
     cdf = cdflib.CDF(hdf_path)
-    times = np.array([
-        datetime(1, 1, 1) + timedelta(days=-1, milliseconds=dt)
-        for dt in cdf.varget("Epoch")
-    ])
+    times = np.array(
+        [
+            datetime(1, 1, 1) + timedelta(days=-1, milliseconds=dt)
+            for dt in cdf.varget("Epoch")
+        ]
+    )
     energies = cdf.varget("FEDU_Energy") * 1000  # keV -> eV
     flux = cdf.varget("FEDU")
     pitch_angles = cdf.varget("FEDU_Alpha")
