@@ -104,7 +104,7 @@ class CalculateLStarResult:
         paired with `drift_local_times`
     drift_K_results : List[:py:class:`~CalculateKResult`]
         Array of :py:class:`~CalculateKResult` instances at each local time,
-        to be paired with `drift_local_times. Through this object one can
+        to be paired with `drift_local_times`. Through this object one can
         obtain a bounce motion path at each local time.
     drift_is_closed : bool
         Boolean whether the drift shell was detected to be closed. For more
