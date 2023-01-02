@@ -5,6 +5,8 @@ __pycache__
 *.txt
 *.csv
 *.vtk
+*.so
+*.o
 
 # Documentation
 docs/api/*

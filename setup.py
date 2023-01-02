@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from setuptools import setup
+from numpy.distutils.core import setup, Extension
 
 with open("README.md") as f:
     LONG_DESCRIPTION = f.read()
@@ -13,6 +13,18 @@ LICENSE = 'BSD-3'
 URL = 'https://dasilva-invariants.readthedocs.io/en/latest/'
 # VERSION should be PEP440 compatible (http://www.python.org/dev/peps/pep-0440)
 VERSION = '0.0.1'
+
+
+def _get_extension(name, funcs):
+    return Extension(
+        name=f"dasilva_invariants._fortran._{name}",
+        sources=[
+            f"dasilva_invariants/_fortran/{name}.f",
+            f"dasilva_invariants/_fortran/{name}_interface.f",
+        ],
+        f2py_options=["only:"] + list(funcs) + [":"]
+    )
+
 
 setup(
     name=PACKAGENAME,
@@ -36,4 +48,9 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
+    ext_modules=[
+        _get_extension("geopack2008", funcs=['recalc', 'force_dipole_tilt', 'dipnumpy']),
+        _get_extension("t96", funcs=['t96numpy']),
+        _get_extension("ts05", funcs=['ts05numpy']),
+    ],    
 )

@@ -18,7 +18,6 @@ from matplotlib.dates import date2num
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import pandas as pd
-import PyGeopack as gp
 from pyhdf.SD import SD, SDC
 import pyvista
 from scipy.interpolate import LinearNDInterpolator
@@ -27,6 +26,8 @@ import vtk
 
 from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
 from .utils import nanoTesla2Gauss
+from ._fortran import _geopack2008, _t96, _ts05  # type:ignore
+
 
 __all__ = [
     "MagneticFieldModel",
@@ -102,6 +103,11 @@ class MagneticFieldModel:
         B[:, 2] = Bz.flatten(order="F")
         self._mesh = pyvista.StructuredGrid(x, y, z)
         self._mesh.point_data["B"] = B
+
+        R_grid, theta_grid, phi_grid = cs.cart2sp(x, y, z)
+        self._mesh.point_data["R_grid"] = R_grid.flatten(order="F")
+        self._mesh.point_data["Theta_grid"] = theta_grid.flatten(order="F")
+        self._mesh.point_data["Phi_grid"] = phi_grid.flatten(order="F")
 
     def trace_field_line(
         self, starting_point: Tuple[float, float, float], step_size: float
@@ -209,19 +215,14 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
     # ------------------------------------------------------------------------
     X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
 
-    x_re = X_grid.flatten(order="F")  # flat arrays, easier later
-    y_re = Y_grid.flatten(order="F")
-    z_re = Z_grid.flatten(order="F")
-
     # Calculate dipole model
     # ------------------------------------------------------------------------
     # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
-    r_re = np.sqrt(x_re**2 + y_re**2 + z_re**2)
-    n_points = r_re.size
+    R_grid = np.sqrt(X_grid**2 + Y_grid**2 + Z_grid**2)
 
-    Bx = nanoTesla2Gauss(3 * x_re * z_re * EARTH_DIPOLE_B0 / r_re**5)
-    By = nanoTesla2Gauss(3 * y_re * z_re * EARTH_DIPOLE_B0 / r_re**5)
-    Bz = nanoTesla2Gauss((3 * z_re**2 - r_re**2) * EARTH_DIPOLE_B0 / r_re**5)
+    Bx = 3 * X_grid * Z_grid * EARTH_DIPOLE_B0 / R_grid**5
+    By = 3 * Y_grid * Z_grid * EARTH_DIPOLE_B0 / R_grid**5
+    Bz = (3 * Z_grid**2 - R_grid**2) * EARTH_DIPOLE_B0 / R_grid**5
 
     # Create magnetic field model
     # ------------------------------------------------------------------------
@@ -250,12 +251,6 @@ def _get_fixed_lfm_grid_centers(
     X_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("X_grid").get())
     Y_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Y_grid").get())
     Z_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Z_grid").get())
-
-    # X_grid_re = (X_grid_raw * units.cm).to(constants.R_earth).value  # type: ignore
-    # Y_grid_re = (Y_grid_raw * units.cm).to(constants.R_earth).value  # type: ignore
-    # Z_grid_re = (Z_grid_raw * units.cm).to(constants.R_earth).value  # type: ignore
-
-    # return X_grid_re, Y_grid_re, Z_grid_re
 
     # This code implements Josh Murphy's point2CellCenteredGrid() function
     # ------------------------------------------------------------------------
@@ -447,8 +442,6 @@ def _get_tsyganenko_on_lfm_grid(
         Path to LFM file in HDF4 format to provide grid.
     external_field_only : boopl
         Set to True to not include the internal (dipole) model
-    force_zero_tilt : bool
-        Force a zero tilt when calculating the magnetic field
 
     Returns
     -------
@@ -463,62 +456,60 @@ def _get_tsyganenko_on_lfm_grid(
         lfm_hdf4_path
     )
 
-    x_re_sm = X_re_sm_grid.flatten(order="F")  # flat arrays, easier for later
-    y_re_sm = Y_re_sm_grid.flatten(order="F")
-    z_re_sm = Z_re_sm_grid.flatten(order="F")
+    x_re_sm = X_re_sm_grid.flatten()  # flat arrays, easier for later
+    y_re_sm = Y_re_sm_grid.flatten()
+    z_re_sm = Z_re_sm_grid.flatten()
 
-    # Call Geopack to get external fields
+    # Call compiled Tsyganenko fortran code  to get extenral field
     # ------------------------------------------------------------------------
-    date = int(time.strftime("%Y%m%d"))
-    ut = int(time.strftime("%H")) + time.minute / 60
-
-    gp_tmp = gp.ModelField(
-        x_re_sm,
-        y_re_sm,
-        z_re_sm,
-        Date=date,
-        ut=ut,
-        Model=model_name,
-        CoordIn="SM",
-        CoordOut="SM",
-        **params,
+    parmod = (params["Pdyn"], params["dst"], params["By"], params["Bz"]) + tuple(
+        [params[f"W{i+1}"] for i in range(6)]
     )
-    gp_tmp = cast(
-        Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]], gp_tmp
+    time_tup = (
+        time.year,
+        int(time.strftime("%j")),
+        time.hour,
+        time.minute,
+        time.second,
     )
 
-    Bx, By, Bz = gp_tmp
+    _geopack2008.recalc(time_tup, -400, 0.0, 0.0)
+    _geopack2008.force_dipole_tilt(0.0)
 
+    if model_name == "T96":
+        Bx, By, Bz = _t96.t96numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+    elif model_name == "TS05":
+        Bx, By, Bz = _ts05.ts05numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+    else:
+        raise ValueError(f"Invalid parameter model_name={repr(model_name)}")
+
+    # Calculate dipole field for internal model,
+    # ----------------------------------------------------------------------
+    if not external_field_only:
+        Bx_dip, By_dip, Bz_dip = _geopack2008.dipnumpy(x_re_sm, y_re_sm, z_re_sm)
+        Bx += Bx_dip
+        By += By_dip
+        Bz += Bz_dip
+
+    # Convert from nT to Gauss
+    # ------------------------------------------------------------------------
     Bx = nanoTesla2Gauss(Bx)
     By = nanoTesla2Gauss(By)
     Bz = nanoTesla2Gauss(Bz)
 
-    # Calculate dipole field for internal model,
-    # see Kivelson and Russel equations 6.3(a)-(c), page 165.
-    # ----------------------------------------------------------------------
-    if external_field_only:
-        r_re_sm = np.sqrt(x_re_sm**2 + y_re_sm**2 + z_re_sm**2)
-
-        Bx_int = 3 * x_re_sm * z_re_sm * EARTH_DIPOLE_B0 / r_re_sm**5
-        By_int = 3 * y_re_sm * z_re_sm * EARTH_DIPOLE_B0 / r_re_sm**5
-        Bz_int = (3 * z_re_sm**2 - r_re_sm**2) * EARTH_DIPOLE_B0 / r_re_sm**5
-
-        Bx_int = nanoTesla2Gauss(Bx_int)
-        By_int = nanoTesla2Gauss(By_int)
-        Bz_int = nanoTesla2Gauss(Bz_int)
-
-        Bx -= Bx_int
-        By -= By_int
-        Bz -= Bz_int
-
     # Create magnetic field model
     # ------------------------------------------------------------------------
+    shape = X_re_sm_grid.shape
+    Bx = Bx.reshape(shape)
+    By = By.reshape(shape)
+    Bz = Bz.reshape(shape)
+
     return MagneticFieldModel(
         X_re_sm_grid,
         Y_re_sm_grid,
         Z_re_sm_grid,
         Bx,
-        Bz,
+        By,
         Bz,
         inner_boundary=LFM_INNER_BOUNDARY,
     )
@@ -586,7 +577,7 @@ def get_tsyganenko_params(
                 "8_status",
                 "kp",
                 "akp3",
-                "SymH",
+                "dst",
                 "Bz1",
                 "Bz2",
                 "Bz3",
@@ -617,11 +608,11 @@ def get_tsyganenko_params(
     ]
 
     # Interpolate Tsyganenko parameters (some may be unused)
-    cols = ["Pdyn", "SymH", "By", "Bz", "W1", "W2", "W3", "W4", "W5", "W6"]
+    cols = ["Pdyn", "dst", "By", "Bz", "W1", "W2", "W3", "W4", "W5", "W6"]
     params_dict = {}
 
     for col in cols:
-        params_dict[col] = np.interp(
+        (params_dict[col],) = np.interp(
             date2num(times_list), date2num(df.DateTime), df[col]
         )
 
