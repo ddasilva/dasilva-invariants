@@ -4,54 +4,30 @@
 !     ================================================================
 
 !     Wrapper for the recalc_08() subroutine
-!        time = (year, doy, hour, minute month)
-!     --------------------------------------- 
-      subroutine recalc(time, vx, vy, vz)
+!       time = (year, doy, hour, minute month)
+!       v = (vx, vy, vz)
+!     --------------------------------------- ---
+      subroutine recalc(time, v)
       integer, intent(in) :: time(5)
-      real, intent(in) :: vx, vy, vz
+      real, intent(in) :: v(3)
       
       call recalc_08 (time(1), time(2), time(3), time(4),
-     * time(5), vx, vy, vz)
+     * time(5), v(1), v(2), v(3))
 
       end subroutine
 
-!     Forces the Dipole Tilt to a certain value
-!     -----------------------------------------
-      subroutine force_dipole_tilt(dipole_tilt)
-      real, intent(in) :: dipole_tilt
-      common /GEOPACK1/ PSI,SPS,CPS
-
-      PSI = dipole_tilt
-      CPS = COS(dipole_tilt)
-      SPS = SIN(dipole_tilt)
-      end subroutine
-
-!     Wrapper to get the dipole field
-!     --------------------------------
+!     Wrapper to get the dipole field in SM coordinates
+!     -------------------------------------------------
       subroutine dipnumpy(X,Y,Z,BX,BY,BZ,n)
       real, intent(in) :: X(n), Y(n), Z(n)
       integer, intent(in) :: n
       real, intent(out) :: BX(n), BY(n), BZ(n)        
-      real :: xgsw, ygsw, zgsw
-      COMMON /GEOPACK1/ AA(10),SPS,CPS,BB(22)
-      COMMON /GEOPACK2/ G(105),H(105),REC(105)
+      real :: xgsw, ygsw, zgsw, bxgsw, bygsw, bzgsw
 
-      SPS = 0.0
-      CPS = 1.0
-      
       do i = 1, n
-         xgsw = X(i)
-         ygsw = Y(i)
-         zgsw = Z(i)
-         DIPMOM=SQRT(G(2)**2+G(3)**2+H(3)**2)
-         P=XGSW**2
-         U=ZGSW**2
-         V=3.*ZGSW*XGSW
-         T=YGSW**2
-         Q=DIPMOM/SQRT(P+T+U)**5
-         BX(i)=Q*((T+U-2.*P)*SPS-V*CPS)
-         BY(i)=-3.*YGSW*Q*(XGSW*SPS+ZGSW*CPS)
-         BZ(i)=Q*((P+T-2.*U)*CPS-V*SPS)
-c     all DIP_08(X(i),Y(i),Z(i),BX(i),BY(i),BZ(i))
-      end do   
+         call SMGSW_08(X(i), Y(i), Z(i), xgsw, ygsw, zgsw, 1)
+         call DIP_08(xgsw, ygsw, zgsw, bxgsw, bygsw, bzgsw)
+         call SMGSW_08(BX(i), BY(i), BZ(i), bxgsw, bygsw, bzgsw, -1)         
+      end do
+      
       end subroutine

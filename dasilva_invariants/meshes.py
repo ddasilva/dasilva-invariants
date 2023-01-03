@@ -473,8 +473,7 @@ def _get_tsyganenko_on_lfm_grid(
         time.second,
     )
 
-    _geopack2008.recalc(time_tup, -400, 0.0, 0.0)
-    _geopack2008.force_dipole_tilt(0.0)
+    _geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
 
     if model_name == "T96":
         Bx, By, Bz = _t96.t96numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
