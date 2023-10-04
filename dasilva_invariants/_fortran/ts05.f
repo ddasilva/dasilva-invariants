@@ -1,6 +1,13 @@
 c
 c
-      SUBROUTINE T04_s (IOPT,PARMOD,PS,X,Y,Z,BX,BY,BZ)
+      SUBROUTINE T04_s (IOPT,PARMOD,PS,X,Y,Z,BX,BY,BZ,DDS_CF_SF,
+     * DDS_TAIL1_SF,
+     * DDS_TAIL2_SF,
+     * DDS_SRC_SF,
+     * DDS_PRC_SF,
+     * DDS_BIRK1_SF,
+     * DDS_BIRK2_SF,
+     * DDS_PEN_SF)
 c
 c  ASSEMBLED:  MARCH 25, 2004;
 C  UPDATED:  AUGUST 2 & 31, DECEMBER 27, 2004.
@@ -66,7 +73,15 @@ c
      *  PSS,XX,YY,ZZ,BXCF,BYCF,BZCF,BXT1,BYT1,BZT1,BXT2,BYT2,BZT2,
      *  BXSRC,BYSRC,BZSRC,BXPRC,BYPRC,BZPRC, BXR11,BYR11,BZR11,
      *  BXR12,BYR12,BZR12,BXR21,BYR21,BZR21,BXR22,BYR22,BZR22,HXIMF,
-     *  HYIMF,HZIMF,BBX,BBY,BBZ
+     *     HYIMF,HZIMF,BBX,BBY,BBZ,DDS_CF_SF,
+     * DDS_TAIL1_SF,
+     * DDS_TAIL2_SF,
+     * DDS_SRC_SF,
+     * DDS_PRC_SF,
+     * DDS_BIRK1_SF,
+     * DDS_BIRK2_SF,
+     * DDS_PEN_SF
+      
 C
       DATA A/1.00000,5.44118,0.891995,9.09684,0.00000,-7.18972,12.2700,
      * -4.89408,0.00000,0.870536,1.36081,0.00000,0.688650,0.602330,
@@ -98,11 +113,21 @@ C
       YY=Y
       ZZ=Z
 C
+
+
+      
       CALL EXTERN (IOPGEN,IOPTT,IOPB,IOPR,A,69,PDYN,DST_AST,BXIMF,BYIMF,
      + BZIMF,W1,W2,W3,W4,W5,W6,PSS,XX,YY,ZZ,BXCF,BYCF,BZCF,BXT1,BYT1,
      + BZT1,BXT2,BYT2,BZT2,BXSRC,BYSRC,BZSRC,BXPRC,BYPRC,BZPRC, BXR11,
      + BYR11,BZR11,BXR12,BYR12,BZR12,BXR21,BYR21,BZR21,BXR22,BYR22,
-     + BZR22,HXIMF,HYIMF,HZIMF,BBX,BBY,BBZ)
+     + BZR22,HXIMF,HYIMF,HZIMF,BBX,BBY,BBZ,DDS_CF_SF,
+     + DDS_TAIL1_SF,
+     + DDS_TAIL2_SF,
+     + DDS_SRC_SF,
+     + DDS_PRC_SF,
+     + DDS_BIRK1_SF,
+     + DDS_BIRK2_SF,
+     + DDS_PEN_SF)
 C
       BX=BBX
       BY=BBY
@@ -111,14 +136,25 @@ C
       RETURN
       END
 
+
+      
 c%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 c
+ 
+      
       SUBROUTINE EXTERN (IOPGEN,IOPT,IOPB,IOPR,A,NTOT,
      *  PDYN,DST,BXIMF,BYIMF,BZIMF,W1,W2,W3,W4,W5,W6,PS,X,Y,Z,
      *  BXCF,BYCF,BZCF,BXT1,BYT1,BZT1,BXT2,BYT2,BZT2,
      *  BXSRC,BYSRC,BZSRC,BXPRC,BYPRC,BZPRC, BXR11,BYR11,BZR11,
      *  BXR12,BYR12,BZR12,BXR21,BYR21,BZR21,BXR22,BYR22,BZR22,HXIMF,
-     *  HYIMF,HZIMF,BX,BY,BZ)
+     *  HYIMF,HZIMF,BX,BY,BZ,DDS_CF_SF,
+     *  DDS_TAIL1_SF,
+     *  DDS_TAIL2_SF,
+     *  DDS_SRC_SF,
+     *  DDS_PRC_SF,
+     *  DDS_BIRK1_SF,
+     *  DDS_BIRK2_SF,
+     *  DDS_PEN_SF)
 C
 C   IOPGEN - GENERAL OPTION FLAG:  IOPGEN=0 - CALCULATE TOTAL FIELD
 C                                  IOPGEN=1 - DIPOLE SHIELDING ONLY
@@ -138,9 +174,19 @@ C
 C   IOPR -  RING CURRENT FLAG:     IOPR=0  -  BOTH SRC AND PRC
 C                                  IOPR=1  -  SRC ONLY
 C                                  IOPR=2  -  PRC ONLY
-C
-      IMPLICIT  REAL * 8  (A - H, O - Z)
-C
+
+C     
+      IMPLICIT REAL * 8  (A - H, O - Z)
+      real, intent(in) :: DDS_CF_SF,
+     *  DDS_TAIL1_SF,
+     *  DDS_TAIL2_SF,
+     *  DDS_SRC_SF,
+     *  DDS_PRC_SF,
+     *  DDS_BIRK1_SF,
+     *  DDS_BIRK2_SF,
+     *  DDS_PEN_SF
+
+C     
       DIMENSION A(NTOT)
 C
       COMMON /TAIL/ DXSHIFT1,DXSHIFT2,D,DELTADY  ! THE COMMON BLOCKS FORWARD NONLINEAR PARAMETERS
@@ -148,11 +194,24 @@ C
       COMMON /RCPAR/ SC_SY,SC_AS,PHI
       COMMON /G/ G
       COMMON /RH0/ RH0
-C
+
+C     
 C
       DATA A0_A,A0_S0,A0_X0 /34.586D0,1.1960D0,3.4397D0/   !   SHUE ET AL. PARAMETERS
       DATA DSIG /0.005D0/, RH0,RH2 /7.5D0,-5.2D0/
-c
+
+
+c$$$      print *, DDS_CF_SF
+c$$$      print *, DDS_TAIL1_SF
+c$$$      print *, DDS_TAIL2_SF
+c$$$      print *, DDS_SRC_SF
+c$$$      print *, DDS_PRC_SF
+c$$$      print *, DDS_BIRK1_SF
+c$$$      print *, DDS_BIRK2_SF
+c$$$      print *, DDS_PEN_SF
+c$$$c
+
+      
       XAPPA=(PDYN/2.)**A(23)   !  OVERALL SCALING PARAMETER
       RH0=7.5                  !  TAIL HINGING DISTANCE
 c
@@ -313,14 +372,43 @@ c
       A_R11=A(16)+A(17)*A(43)*W5/DSQRT(W5**2+A(43)**2)
       A_R21=A(18)+A(19)*A(44)*W6/DSQRT(W6**2+A(44)**2)
 
-      BBX=A(1)*BXCF+TAMP1*BXT1+TAMP2*BXT2+A_SRC*BXSRC+A_PRC*BXPRC
-     * +A_R11*BXR11+A_R21*BXR21+A(20)*HXIMF
+      !    Set global common (global) variables
+c$$$
+c$$$      print *, DDS_CF_SF
+c$$$      print *, DDS_TAIL1_SF
+c$$$      print *, DDS_TAIL2_SF
+c$$$      print *, DDS_SRC_SF
+c$$$      print *, DDS_PRC_SF
+c$$$      print *, DDS_BIRK1_SF
+c$$$      print *, DDS_BIRK2_SF
+c$$$      print *, DDS_PEN_SF
+      
+      BBX=DDS_CF_SF*A(1)*BXCF
+     * + DDS_TAIL1_SF*TAMP1*BXT1
+     * + DDS_TAIL2_SF*TAMP2*BXT2
+     * + DDS_SRC_SF*A_SRC*BXSRC
+     * + DDS_PRC_SF*A_PRC*BXPRC      
+     * + DDS_BIRK1_SF*A_R11*BXR11
+     * + DDS_BIRK2_SF*A_R21*BXR21
+     * + DDS_PEN_SF*A(20)*HXIMF
 
-      BBY=A(1)*BYCF+TAMP1*BYT1+TAMP2*BYT2+A_SRC*BYSRC+A_PRC*BYPRC
-     * +A_R11*BYR11+A_R21*BYR21+A(20)*HYIMF
+      BBY=DDS_CF_SF*A(1)*BYCF
+     * + DDS_TAIL1_SF*TAMP1*BYT1
+     * + DDS_TAIL2_SF*TAMP2*BYT2
+     * + DDS_SRC_SF*A_SRC*BYSRC
+     * + DDS_PRC_SF*A_PRC*BYPRC
+     * + DDS_BIRK1_SF*A_R11*BYR11
+     * + DDS_BIRK2_SF*A_R21*BYR21
+     * + DDS_PEN_SF*A(20)*HYIMF
 
-      BBZ=A(1)*BZCF+TAMP1*BZT1+TAMP2*BZT2+A_SRC*BZSRC+A_PRC*BZPRC
-     * +A_R11*BZR11+A_R21*BZR21+A(20)*HZIMF
+      BBZ=DDS_CF_SF*A(1)*BZCF
+     * + DDS_TAIL1_SF*TAMP1*BZT1
+     * + DDS_TAIL2_SF*TAMP2*BZT2
+     * + DDS_SRC_SF*A_SRC*BZSRC
+     * + DDS_PRC_SF*A_PRC*BZPRC
+     * + DDS_BIRK1_SF*A_R11*BZR11
+     * + DDS_BIRK2_SF*A_R21*BZR21
+     * + DDS_PEN_SF*A(20)*HZIMF
 C
 C   AND WE HAVE THE TOTAL EXTERNAL FIELD.
 C
