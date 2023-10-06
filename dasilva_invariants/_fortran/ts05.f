@@ -7,7 +7,8 @@ c
      * DDS_PRC_SF,
      * DDS_BIRK1_SF,
      * DDS_BIRK2_SF,
-     * DDS_PEN_SF)
+     * DDS_PEN_SF,
+     * DDS_OUTSIDE_FLAG)
 c
 c  ASSEMBLED:  MARCH 25, 2004;
 C  UPDATED:  AUGUST 2 & 31, DECEMBER 27, 2004.
@@ -80,7 +81,8 @@ c
      * DDS_PRC_SF,
      * DDS_BIRK1_SF,
      * DDS_BIRK2_SF,
-     * DDS_PEN_SF
+     * DDS_PEN_SF,
+     * DDS_OUTSIDE_FLAG
       
 C
       DATA A/1.00000,5.44118,0.891995,9.09684,0.00000,-7.18972,12.2700,
@@ -127,12 +129,14 @@ C
      + DDS_PRC_SF,
      + DDS_BIRK1_SF,
      + DDS_BIRK2_SF,
-     + DDS_PEN_SF)
+     + DDS_PEN_SF,
+     + DDS_OUTSIDE_FLAG)
 C
       BX=BBX
       BY=BBY
       BZ=BBZ
 C
+     
       RETURN
       END
 
@@ -154,7 +158,8 @@ c
      *  DDS_PRC_SF,
      *  DDS_BIRK1_SF,
      *  DDS_BIRK2_SF,
-     *  DDS_PEN_SF)
+     *  DDS_PEN_SF,
+     *  DDS_OUTSIDE_FLAG)
 C
 C   IOPGEN - GENERAL OPTION FLAG:  IOPGEN=0 - CALCULATE TOTAL FIELD
 C                                  IOPGEN=1 - DIPOLE SHIELDING ONLY
@@ -184,8 +189,8 @@ C
      *  DDS_PRC_SF,
      *  DDS_BIRK1_SF,
      *  DDS_BIRK2_SF,
-     *  DDS_PEN_SF
-
+     *  DDS_PEN_SF,
+     *  DDS_OUTSIDE_FLAG
 C     
       DIMENSION A(NTOT)
 C
@@ -210,7 +215,7 @@ c$$$      print *, DDS_BIRK1_SF
 c$$$      print *, DDS_BIRK2_SF
 c$$$      print *, DDS_PEN_SF
 c$$$c
-
+      
       
       XAPPA=(PDYN/2.)**A(23)   !  OVERALL SCALING PARAMETER
       RH0=7.5                  !  TAIL HINGING DISTANCE
@@ -372,17 +377,7 @@ c
       A_R11=A(16)+A(17)*A(43)*W5/DSQRT(W5**2+A(43)**2)
       A_R21=A(18)+A(19)*A(44)*W6/DSQRT(W6**2+A(44)**2)
 
-      !    Set global common (global) variables
-c$$$
-c$$$      print *, DDS_CF_SF
-c$$$      print *, DDS_TAIL1_SF
-c$$$      print *, DDS_TAIL2_SF
-c$$$      print *, DDS_SRC_SF
-c$$$      print *, DDS_PRC_SF
-c$$$      print *, DDS_BIRK1_SF
-c$$$      print *, DDS_BIRK2_SF
-c$$$      print *, DDS_PEN_SF
-      
+      !    Scale contributing current terms      
       BBX=DDS_CF_SF*A(1)*BXCF
      * + DDS_TAIL1_SF*TAMP1*BXT1
      * + DDS_TAIL2_SF*TAMP2*BXT2
@@ -409,6 +404,8 @@ c$$$      print *, DDS_PEN_SF
      * + DDS_BIRK1_SF*A_R11*BZR11
      * + DDS_BIRK2_SF*A_R21*BZR21
      * + DDS_PEN_SF*A(20)*HZIMF
+
+      
 C
 C   AND WE HAVE THE TOTAL EXTERNAL FIELD.
 C
@@ -416,30 +413,43 @@ C
 C  NOW, LET US CHECK WHETHER WE HAVE THE CASE (1). IF YES - ALL DONE:
 C
       IF (SIGMA.LT.S0-DSIG) THEN    !  (X,Y,Z) IS INSIDE THE MAGNETOSPHERE
-
        BX=BBX
        BY=BBY
        BZ=BBZ
                      ELSE           !  THIS IS THE MOST COMPLEX CASE: WE ARE INSIDE
-C                                             THE INTERPOLATION REGION
+C     THE INTERPOLATION REGION
        FINT=0.5*(1.-(SIGMA-S0)/DSIG)
        FEXT=0.5*(1.+(SIGMA-S0)/DSIG)
 C
+
        CALL DIPOLE (PS,X,Y,Z,QX,QY,QZ)
-       BX=(BBX+QX)*FINT+OIMFX*FEXT -QX
-       BY=(BBY+QY)*FINT+OIMFY*FEXT -QY
-       BZ=(BBZ+QZ)*FINT+OIMFZ*FEXT -QZ
+       BX=((BBX+QX)*FINT+OIMFX*FEXT -QX)
+       BY=((BBY+QY)*FINT+OIMFY*FEXT -QY)
+       BZ=((BBZ+QZ)*FINT+OIMFZ*FEXT -QZ)
 c
+
+       if (dds_outside_flag .gt. 0) then
+          BX = NaN
+          BY = NaN
+          BZ = NaN
+       endif
+       
         ENDIF  !   THE CASES (1) AND (2) ARE EXHAUSTED; THE ONLY REMAINING
 C                      POSSIBILITY IS NOW THE CASE (3):
 C++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-        ELSE
+      ELSE
                 CALL DIPOLE (PS,X,Y,Z,QX,QY,QZ)
-                BX=OIMFX-QX
-                BY=OIMFY-QY
-                BZ=OIMFZ-QZ
-        ENDIF
-C
+                BX=(OIMFX-QX)
+                BY=(OIMFY-QY)
+                BZ=(OIMFZ-QZ)
+       if (dds_outside_flag .gt. 0) then
+          BX = NaN
+          BY = NaN
+          BZ = NaN
+       endif
+
+             ENDIF
+C            
       END
 c
 
