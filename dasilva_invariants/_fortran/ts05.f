@@ -182,7 +182,7 @@ C                                  IOPR=2  -  PRC ONLY
 
 C     
       IMPLICIT REAL * 8  (A - H, O - Z)
-      real, intent(in) :: DDS_CF_SF,
+      real * 8, intent(in) :: DDS_CF_SF,
      *  DDS_TAIL1_SF,
      *  DDS_TAIL2_SF,
      *  DDS_SRC_SF,

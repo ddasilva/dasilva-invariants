@@ -10,12 +10,12 @@
       real, intent(in) :: PARMOD(10), PS
       real, intent(in) :: X(n), Y(n), Z(n)
       integer, intent(in) :: n
-      
       real, intent(out) :: BX(n), BY(n), BZ(n)        
+      INTEGER, PARAMETER :: dp = SELECTED_REAL_KIND(15)      
       
       do i = 1, n
          call T04_s (IOPT,PARMOD,PS,X(i),Y(i),Z(i),BX(i),BY(i),BZ(i),
-     *        1.,1.,1.,1.,1.,1.,1.,1.,0.)
+     *        1._dp,1._dp,1._dp,1._dp,1._dp,1._dp,1._dp,1._dp,0._dp)
       end do   
       end     
 
@@ -39,7 +39,8 @@
       subroutine ts05scalednumpy(PARMOD,PS,X,Y,Z,BX,BY,BZ,n,
      *     cf_sf, tail1_sf, tail2_sf, src_sf, prc_sf,
      *     birk1_sf, birk2_sf, pen_sf, outside_flag)
-      real, intent(in) :: PARMOD(10), PS, cf_sf, tail1_sf,
+      real, intent(in) :: PARMOD(10), PS
+      real*8, intent(in) :: cf_sf, tail1_sf,
      *     tail2_sf, src_sf, prc_sf, birk1_sf, birk2_sf, pen_sf,
      *     outside_flag
       real, intent(in) :: X(n), Y(n), Z(n)
