@@ -316,8 +316,9 @@ def calculate_LStar(
     starting_pitch_angle: Optional[float] = None,
     major_step: float = 0.05,
     minor_step: float = 0.01,
+    bisect_final: bool = False,
     interval_size_threshold: float = 0.05,
-    rel_error_threshold: float = 0.01,
+    rel_error_threshold: float = 1e-5,
     max_iters: int = 300,
     trace_step_size: Optional[float] = None,
     interp_local_times: bool = True,
@@ -448,6 +449,8 @@ def calculate_LStar(
                     trace_step_size,
                     major_step,
                     minor_step,
+                    bisect_final=bisect_final,
+                    bisect_rel_error_threshold=rel_error_threshold,
                 )
         elif mode == "bisection":
             if starting_pitch_angle == 90.0:
@@ -466,7 +469,6 @@ def calculate_LStar(
                     last_rvalue,
                     local_time,
                     max_iters,
-                    interval_size_threshold,
                     rel_error_threshold,
                     trace_step_size,
                 )
@@ -552,9 +554,10 @@ def _bisect_rvalue_by_K(
     starting_rvalue: float,
     local_time: float,
     max_iters: int,
-    interval_size_threshold: float,
     rel_error_threshold: float,
     step_size: Optional[float],
+    upper_rvalue: Optional[float] = None,
+    lower_rvalue: Optional[float] = None,
 ) -> Tuple[float, CalculateKResult]:
     """Internal helper function to calculate_LStar(). Applies bisection method
     to find an radius with an equal K, stopping when either relative error
@@ -596,8 +599,11 @@ def _bisect_rvalue_by_K(
     """
     # Perform bisection method searching for K(Bm, r)
     # ------------------------------------------------------------------------
-    upper_rvalue = starting_rvalue * 2
-    lower_rvalue = mesh.inner_boundary
+    if upper_rvalue is None:
+        upper_rvalue = starting_rvalue * 2
+    if lower_rvalue is None:
+        lower_rvalue = mesh.inner_boundary
+
     current_rvalue = starting_rvalue
     history = []
 
@@ -605,37 +611,37 @@ def _bisect_rvalue_by_K(
         # Check for interval size stopping condition -------------------------
         interval_size = upper_rvalue - lower_rvalue
 
-        if interval_size < interval_size_threshold:
-            # Calculate K and upper and lower bounds
-            lower_starting_point = utils.sp2cart_point(
-                r=lower_rvalue, phi=-local_time, theta=0
-            )
-            upper_starting_point = utils.sp2cart_point(
-                r=upper_rvalue, phi=-local_time, theta=0
-            )
+        # if interval_size < interval_size_threshold:
+        #     # Calculate K and upper and lower bounds
+        #     lower_starting_point = utils.sp2cart_point(
+        #         r=lower_rvalue, phi=-local_time, theta=0
+        #     )
+        #     upper_starting_point = utils.sp2cart_point(
+        #         r=upper_rvalue, phi=-local_time, theta=0
+        #     )
 
-            lower_result = calculate_K(
-                mesh, lower_starting_point, Bm=Bm, step_size=step_size
-            )
-            upper_result = calculate_K(
-                mesh, upper_starting_point, Bm=Bm, step_size=step_size
-            )
+        #     lower_result = calculate_K(
+        #         mesh, lower_starting_point, Bm=Bm, step_size=step_size
+        #     )
+        #     upper_result = calculate_K(
+        #         mesh, upper_starting_point, Bm=Bm, step_size=step_size
+        #     )
 
-            # Interpolate between upper and lower bounds to find final rvalue
-            (final_rvalue,) = np.interp(
-                [target_K],
-                [upper_result.K, lower_result.K],
-                [upper_rvalue, lower_rvalue],
-            )
-            final_starting_point = utils.sp2cart_point(
-                r=final_rvalue, phi=-local_time, theta=0
-            )
+        #     # Interpolate between upper and lower bounds to find final rvalue
+        #     (final_rvalue,) = np.interp(
+        #         [target_K],
+        #         [upper_result.K, lower_result.K],
+        #         [upper_rvalue, lower_rvalue],
+        #     )
+        #     final_starting_point = utils.sp2cart_point(
+        #         r=final_rvalue, phi=-local_time, theta=0
+        #     )
 
-            final_result = calculate_K(
-                mesh, final_starting_point, Bm=Bm, step_size=step_size
-            )
+        #     final_result = calculate_K(
+        #         mesh, final_starting_point, Bm=Bm, step_size=step_size
+        #     )
 
-            return final_rvalue, final_result
+        #     return final_rvalue, final_result
 
         # Check for relative error stopping condition ------------------------
         current_starting_point = utils.sp2cart_point(
@@ -822,6 +828,8 @@ def _linear_search_rvalue_by_K(
     step_size: Optional[float],
     major_step: float,
     minor_step: float,
+    bisect_final: bool = False,
+    bisect_rel_error_threshold: Optional[float] = None
 ) -> Tuple[float, CalculateKResult]:
     """Internal helper function to calculate_LStar(). Steps in large and then
     small increments to search for a drift shell radius that has the target
@@ -921,10 +929,29 @@ def _linear_search_rvalue_by_K(
         in_interval = tmp[0] < target_K < tmp[1]
 
         if in_interval:
-            # Interpolate between upper and lower bounds to find final rvalue
-            (final_rvalue,) = np.interp([target_K], history_K[-2:], history_rvalue[-2:])
-            final_point = utils.sp2cart_point(r=final_rvalue, phi=-local_time, theta=0)
-            final_result = calculate_K(mesh, final_point, Bm=Bm, step_size=step_size)
+            if bisect_final:
+                # Stasrt at center
+                lower_rvalue = min(history_rvalue[-2:])
+                upper_rvalue = max(history_rvalue[-2:])
+                bisect_start_rvalue = (lower_rvalue + upper_rvalue) / 2
+                
+                return _bisect_rvalue_by_K(
+                    mesh,
+                    target_K,
+                    Bm,
+                    bisect_start_rvalue,
+                    local_time,
+                    max_iters,
+                    bisect_rel_error_threshold,
+                    step_size,
+                    lower_rvalue=lower_rvalue,
+                    upper_rvalue=upper_rvalue,
+                )
+            else:
+                # Interpolate between upper and lower bounds to find final rvalue
+                (final_rvalue,) = np.interp([target_K], history_K[-2:], history_rvalue[-2:])
+                final_point = utils.sp2cart_point(r=final_rvalue, phi=-local_time, theta=0)
+                final_result = calculate_K(mesh, final_point, Bm=Bm, step_size=step_size)
 
             return final_rvalue, final_result
 
