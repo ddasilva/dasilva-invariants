@@ -5,18 +5,17 @@ defined specifically for the function. These functions raise a documented set of
 exceptions, which should be caught to detect problems which may occur during
 processing.
 """
+from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
-import sys
 
 from ai import cs
 import numpy as np
 from numpy.typing import NDArray
 from scipy import interpolate
-from scipy.integrate import RK45
 
 from . import utils
-from .meshes import MagneticFieldModel, FieldLineTrace
+from .meshes import MagneticFieldModel, FieldLineTrace, get_igrf_on_rectangular_grid
 
 
 __all__ = [
@@ -81,7 +80,7 @@ class CalculateKResult:
     integral_axis_latitude: NDArray[np.float64]
     integral_integrand: NDArray[np.float64]
 
-    _trace: FieldLineTrace
+    trace: FieldLineTrace
 
 
 @dataclass
@@ -109,6 +108,10 @@ class CalculateLStarResult:
     drift_is_closed : bool
         Boolean whether the drift shell was detected to be closed. For more
         information, see da Silva et al., 2023
+    igrf_extend_traces : List[FieldLineTrace]
+        List of field line traces used to extend the LFM drift shell to 
+        1 Re using IGRF. Only set if igrf_extend=True in the call to
+        calculate_LStar(), None otherwise.
     integral_axis : NDArray[np.float64]
         Corresponding to the integral used to calculate LStar, this is the
         integration axis in local time. Units of radians
@@ -138,6 +141,8 @@ class CalculateLStarResult:
     integral_theta: NDArray[np.float64]
     # integral integrand
     integral_integrand: NDArray[np.float64]
+    # Field line traces which extend drift shell using IGRF
+    igrf_extend_traces: Optional[List[FieldLineTrace]] = None   
 
 
 class FieldLineTraceInsufficient(RuntimeError):
@@ -296,13 +301,14 @@ def calculate_K(
         Bmin=Bmin,
         mirror_latitude=mirror_latitude,
         starting_point=starting_point,
-        _trace=trace,
+        trace=trace,
         trace_points=trace_points_sorted,
         trace_latitude=trace_latitude_sorted,
         trace_field_strength=trace_field_strength_sorted,
         integral_axis=integral_axis,
         integral_axis_latitude=integral_axis_latitude,
         integral_integrand=integral_integrand,
+
     )
 
 
@@ -314,6 +320,9 @@ def calculate_LStar(
     starting_mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
     starting_pitch_angle: Optional[float] = None,
+    igrf_extend: bool = False,
+    igrf_extend_time: Optional[datetime] = None,
+    igrf_extend_radius: float = 1.0,
     major_step: float = 0.05,
     minor_step: float = 0.01,
     interval_size_threshold: float = 0.05,
@@ -379,6 +388,14 @@ def calculate_LStar(
     -------
       result: :py:class:`~CalculateLStarResult`
     """
+    # Validate function parameters
+    # ------------------------------------------------------------------------
+    if igrf_extend and igrf_extend_time is None:
+        raise ValueError(
+            "If igrf_extend=True, the the igrf_extend_time keyword must be "
+            "set to a datetime instance to configure the IGRF model."
+        )
+
     # Determine list of local times we will search
     # ------------------------------------------------------------------------
     _, _, starting_phi = utils.cart2sp_point(*starting_point)
@@ -488,13 +505,21 @@ def calculate_LStar(
     # This method assumes a dipole below the innery boundary, and integrates
     # around the local times using stokes law with B = curl A.
     # -----------------------------------------------------------------------
-    inner_rvalue = mesh.inner_boundary
-    surface_rvalue = 1
+    surface_rvalue = 1.
+        
+    if igrf_extend:
+        trace_north_latitudes, igrf_traces = _do_igrf_extend(
+            igrf_extend_time, igrf_extend_radius, 
+            drift_K_results
+        )
+        inner_rvalue = igrf_extend_radius
+    else:
+        trace_north_latitudes = np.array(
+            [result.trace_latitude.max() for result in drift_K_results], dtype=float
+        )
+        inner_rvalue = mesh.inner_boundary
 
-    trace_north_latitudes = np.array(
-        [result.trace_latitude.max() for result in drift_K_results], dtype=float
-    )
-
+        
     if interp_local_times:
         # Interpolate with cubic spline with periodic boundary condition
         # that forces the 1st and 2nd derivatives to be equal at the first
@@ -542,6 +567,7 @@ def calculate_LStar(
         integral_axis=integral_axis,
         integral_theta=integral_theta,
         integral_integrand=integral_integrand,
+        igrf_extend_traces=igrf_traces,
     )
 
 
@@ -955,3 +981,73 @@ def _test_drift_is_closed(drift_rvalues: NDArray[np.float64]) -> bool:
     is_closed = delta_rvalue_final < delta_rvalue_threshold
 
     return is_closed
+
+
+def _do_igrf_extend(
+    time: datetime, inner_radius: float, drift_K_results: List[CalculateKResult]
+) -> Tuple[NDArray[np.float64], List[FieldLineTrace]]:
+    """Extend a drift shell to the surface of the earth (or even underneath)
+    using IGRF.
+
+    Parameters
+    -----------
+    time : datetime
+      Time to evaluate the IGRF model at
+    inner_radius : float
+      Radius to extend to (typically 1.0 for surface of the earth)     
+    drift_K_results : List[CalculateKResult]
+      list of K calculations/traces that specifies the drift shell
+    
+    Returns
+    -------
+    trace_north_latitudes : array of np.float64
+       North latitudes in radians of the intersections field lines at the
+       surface of the earth.
+    igrf_traces : list of FieldLineTrace
+       Field line traces used to extend the field line with IGRF
+    """
+    # Find the limits of the IGRF grid
+    base_inner_radius = 999
+    
+    for drift_K_result in drift_K_results:
+        cur_lowest = np.linalg.norm(drift_K_result.trace_points, axis=1).min()
+        base_inner_radius = min(base_inner_radius, cur_lowest)
+
+    if inner_radius > base_inner_radius:
+        raise ValueError(
+            "igrf_extend=True can only be used to extend the field downwards. "
+            f"Base drift shell ends at {base_inner_radius}, but attempting to "
+            f"extend down to {inner_radius}"
+        )
+        
+    # Evaluate the IGRF model
+    igrf_model = get_igrf_on_rectangular_grid(
+        time,
+        x_range=[-base_inner_radius, base_inner_radius],
+        y_range=[-base_inner_radius, base_inner_radius],
+        z_range=[-base_inner_radius, base_inner_radius],
+        range_padding=inner_radius,
+    )
+
+    # Extend each drift shell field line using IGRF
+    trace_north_latitudes = []
+    igrf_traces = []
+    
+    for drift_K_result in drift_K_results:    
+        most_north_idx = np.argmax(drift_K_result.trace_latitude)
+        most_north_point = drift_K_result.trace_points[most_north_idx, :]
+
+        igrf_trace = igrf_model.trace_field_line(most_north_point)
+
+        _, trace_latitude, _ = cs.cart2sp(
+            x=igrf_trace.points[:, 0],
+            y=igrf_trace.points[:, 1],
+            z=igrf_trace.points[:, 2]
+        )
+        
+        trace_north_latitudes.append(trace_latitude.max())
+        igrf_traces.append(igrf_trace)
+
+    return trace_north_latitudes, igrf_traces
+
+    

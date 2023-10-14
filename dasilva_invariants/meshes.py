@@ -6,7 +6,7 @@ are instances of :py:class:`~MagneticFieldModel`.
 In this module, all grids returned are in units of Re and all magnetic
 fields are in units of Gauss.
 """
-from typing import cast, Dict, List, Optional, Tuple, Union
+from typing import cast, Dict, List, Tuple, Union
 
 from ai import cs
 from astropy import constants, units
@@ -16,12 +16,10 @@ from datetime import datetime, timedelta
 
 from matplotlib.dates import date2num
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 import pandas as pd
 from pyhdf.SD import SD, SDC
 import pyvista
-from scipy.interpolate import LinearNDInterpolator
-from scipy.spatial import KDTree
 import vtk
 
 from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
@@ -110,7 +108,8 @@ class MagneticFieldModel:
         self._mesh.point_data["Phi_grid"] = phi_grid.flatten(order="F")
 
     def trace_field_line(
-        self, starting_point: Tuple[float, float, float], step_size: float
+        self, starting_point: Tuple[float, float, float],
+        step_size: float = 1e-3
     ) -> FieldLineTrace:
         """Perform a field line trace. Implements RK45 in both directions,
         stopping when outside the grid.
@@ -670,4 +669,68 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(
     # Call model using parameters
     return _get_tsyganenko_on_lfm_grid(
         model_name, params, time, lfm_hdf4_path, **kwargs
+    )
+
+
+def get_igrf_on_rectangular_grid(
+    time: datetime,
+    x_range: Tuple[float, float] = (-LFM_INNER_BOUNDARY, LFM_INNER_BOUNDARY),
+    y_range: Tuple[float, float] = (-LFM_INNER_BOUNDARY, LFM_INNER_BOUNDARY),
+    z_range: Tuple[float, float] = (-LFM_INNER_BOUNDARY, LFM_INNER_BOUNDARY),
+    nx: int = 128,
+    ny: int = 128,
+    nz: int = 128,
+    range_padding : float = 0,
+    inner_boundary : float = 1.0,
+        
+):
+    # Prepare grid
+    x_axis = np.linspace(
+        x_range[0] - range_padding,
+        x_range[1] + range_padding,
+        nx
+    )
+    y_axis = np.linspace(
+        y_range[0] - range_padding,
+        y_range[1] + range_padding,
+        ny
+    )
+
+    z_axis = np.linspace(
+        z_range[0] - range_padding,
+        z_range[1] + range_padding,
+        nz
+    )
+
+    x_grid, y_grid, z_grid = np.meshgrid(x_axis, y_axis, z_axis, indexing='ij')
+
+    # Call IGRF code
+    # ------------------------------------------------------------------------
+    time_tup = (
+        time.year,
+        int(time.strftime("%j")),
+        time.hour,
+        time.minute,
+        time.second,
+    )    
+    _geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
+
+    Bx, By, Bz = _geopack2008.igrfnumpy(
+        x_grid.flatten(), y_grid.flatten(), z_grid.flatten()
+    )
+
+    shape = x_grid.shape
+    Bx = nanoTesla2Gauss(Bx).reshape(shape)
+    By = nanoTesla2Gauss(By).reshape(shape)
+    Bz = nanoTesla2Gauss(Bz).reshape(shape)
+
+    radius = np.linalg.norm([x_grid, y_grid, z_grid], axis=0)
+    Bx[radius < inner_boundary] = np.nan
+    By[radius < inner_boundary] = np.nan
+    Bz[radius < inner_boundary] = np.nan
+    
+    # Return MagneticFieldModel
+    return MagneticFieldModel(
+        x_grid, y_grid, z_grid, Bx, By, Bz,
+        inner_boundary=inner_boundary
     )

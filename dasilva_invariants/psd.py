@@ -7,7 +7,6 @@ from typing import Any, Dict
 from astropy.constants import R_earth, m_e, m_p, c
 from astropy import units
 import numpy as np
-from numpy.typing import NDArray
 from scipy.stats import linregress
 
 from .insitu import InSituObservation

@@ -49,7 +49,7 @@ setup(
         "Operating System :: OS Independent",
     ],
     ext_modules=[
-        _get_extension("geopack2008", funcs=['recalc', 'force_dipole_tilt', 'dipnumpy']),
+        _get_extension("geopack2008", funcs=['recalc', 'force_dipole_tilt', 'dipnumpy', 'igrfnumpy']),
         _get_extension("t96", funcs=['t96numpy']),
         _get_extension("ts05", funcs=['ts05numpy']),
     ],    

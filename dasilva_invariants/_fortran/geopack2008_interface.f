@@ -29,5 +29,20 @@
          call DIP_08(xgsw, ygsw, zgsw, bxgsw, bygsw, bzgsw)
          call SMGSW_08(BX(i), BY(i), BZ(i), bxgsw, bygsw, bzgsw, -1)         
       end do
+      end subroutine
+
+!     Wrapper around the IGRF field code in SM coordinates
+!     -------------------------------------------------      
+      subroutine igrfnumpy(X,Y,Z,BX,BY,BZ,n)
+      real, intent(in) :: X(n), Y(n), Z(n)
+      integer, intent(in) :: n
+      real, intent(out) :: BX(n), BY(n), BZ(n)        
+      real :: xgsw, ygsw, zgsw, bxgsw, bygsw, bzgsw
+
+      do i = 1, n
+         call SMGSW_08(X(i), Y(i), Z(i), xgsw, ygsw, zgsw, 1)
+         call IGRF_GSW_08(xgsw, ygsw, zgsw, bxgsw, bygsw, bzgsw)
+         call SMGSW_08(BX(i), BY(i), BZ(i), bxgsw, bygsw, bzgsw, -1)         
+      end do
       
       end subroutine
