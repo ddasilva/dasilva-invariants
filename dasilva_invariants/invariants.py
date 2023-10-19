@@ -108,7 +108,7 @@ class CalculateLStarResult:
         Boolean whether the drift shell was detected to be closed. For more
         information, see da Silva et al., 2023
     extend_traces : List[FieldLineTrace]
-        List of field line traces used to extend the LFM drift shell to 
+        List of field line traces used to extend the LFM drift shell to
         1 Re using IGRF. Only set if igrf_extend=True in the call to
         calculate_LStar(), None otherwise.
     integral_axis : NDArray[np.float64]
@@ -141,7 +141,7 @@ class CalculateLStarResult:
     # integral integrand
     integral_integrand: NDArray[np.float64]
     # Field line traces which extend drift shell using e.g. IGRF
-    extend_traces: Optional[List[FieldLineTrace]] = None   
+    extend_traces: Optional[List[FieldLineTrace]] = None
 
 
 class FieldLineTraceInsufficient(RuntimeError):
@@ -307,7 +307,6 @@ def calculate_K(
         integral_axis=integral_axis,
         integral_axis_latitude=integral_axis_latitude,
         integral_integrand=integral_integrand,
-
     )
 
 
@@ -494,8 +493,8 @@ def calculate_LStar(
     # This method assumes a dipole below the innery boundary, and integrates
     # around the local times using stokes law with B = curl A.
     # -----------------------------------------------------------------------
-    surface_rvalue = 1.
-    
+    surface_rvalue = 1.0
+
     if extend_mesh is not None:
         trace_north_latitudes, extend_traces = _do_mesh_extend(
             extend_mesh, drift_K_results
@@ -503,12 +502,11 @@ def calculate_LStar(
         inner_rvalue = extend_mesh.inner_boundary
     else:
         trace_north_latitudes = np.array(
-            [result.trace_latitude.max() for result in drift_K_results],
-            dtype=float
+            [result.trace_latitude.max() for result in drift_K_results], dtype=float
         )
         inner_rvalue = mesh.inner_boundary
         extend_traces = None
-    
+
     if interp_local_times:
         # Interpolate with cubic spline with periodic boundary condition
         # that forces the 1st and 2nd derivatives to be equal at the first
@@ -976,7 +974,7 @@ def _do_mesh_extend(
     extend_mesh: MagneticFieldModel, drift_K_results: List[CalculateKResult]
 ) -> Tuple[NDArray[np.float64], List[FieldLineTrace]]:
     """Extend a drift shell to the surface of the earth (or even underneath)
-    using a secondary mesh (e.g., from IGRF). 
+    using a secondary mesh (e.g., from IGRF).
 
     Parameters
     -----------
@@ -984,7 +982,7 @@ def _do_mesh_extend(
       mesh that extends the de-factor model to a lower inner bounary.
     drift_K_results : List[CalculateKResult]
       list of K calculations/traces that specifies the drift shell
-    
+
     Returns
     -------
     trace_north_latitudes : array of np.float64
@@ -996,8 +994,8 @@ def _do_mesh_extend(
     # Extend each drift shell field line using IGRF
     trace_north_latitudes = []
     extend_traces = []
-    
-    for drift_K_result in drift_K_results:    
+
+    for drift_K_result in drift_K_results:
         most_north_idx = np.argmax(drift_K_result.trace_latitude)
         most_north_point = drift_K_result.trace_points[most_north_idx, :]
 
@@ -1006,12 +1004,10 @@ def _do_mesh_extend(
         _, trace_latitude, _ = cs.cart2sp(
             x=extend_trace.points[:, 0],
             y=extend_trace.points[:, 1],
-            z=extend_trace.points[:, 2]
+            z=extend_trace.points[:, 2],
         )
-        
+
         trace_north_latitudes.append(trace_latitude.max())
         extend_traces.append(extend_trace)
 
     return trace_north_latitudes, extend_traces
-
-    
