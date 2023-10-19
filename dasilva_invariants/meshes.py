@@ -60,11 +60,11 @@ class MagneticFieldModel:
 
     Attributes
     ----------
-    x_grid : array of (m, n, p)
+    x : array of (m, n, p)
         X coordinates of data, in SM coordiantes and units of Re
-    y_grid : array of (m, n, p)
+    y : array of (m, n, p)
         Y coordinates of data, in SM coordiantes and units of Re
-    z_grid : array of (m, n, p)
+    z : array of (m, n, p)
         Z coordinates of data, in SM coordiantes and units of Re
     Bx : array of (m, n, p)
         Magnetic field X component, in SM coordinates and units of Gauss
@@ -87,12 +87,12 @@ class MagneticFieldModel:
         Bz: NDArray[np.float64],
         inner_boundary: float,
     ):
-        self.x = x
-        self.y = y
-        self.z = z
-        self.Bx = Bx
-        self.By = By
-        self.Bz = Bz
+        self.x = x.copy()
+        self.y = y.copy()
+        self.z = z.copy()
+        self.Bx = Bx.copy()
+        self.By = By.copy()
+        self.Bz = Bz.copy()
         self.inner_boundary = inner_boundary
 
         B = np.empty((Bx.size, 3))
@@ -169,7 +169,6 @@ class MagneticFieldModel:
 
         return B
 
-
 def _fix_lfm_hdf4_array_order(data):
     """Apply fix to LFM data to account for strange format in HDF4 file.
 
@@ -195,6 +194,43 @@ def _fix_lfm_hdf4_array_order(data):
     return data
 
 
+def get_dipole_mesh_on_grid(x_grid, y_grid, z_grid, inner_boundary):
+    """Get the dipole field on an arbitrary grid.
+
+    Parameters
+    ----------
+    x_grid : array of (m, n, p)
+        X coordinates of data, in SM coordiantes and units of Re
+    y_grid : array of (m, n, p)
+        Y coordinates of data, in SM coordiantes and units of Re
+    z_grid : array of (m, n, p)
+        Z coordinates of data, in SM coordiantes and units of Re
+    inner_boundary : float
+        Minimum radius to be considered too close to the earth for model to
+        cover.
+
+    Returns
+    -------
+    mesh : :py:class:`~MagneticFieldModel`
+        Mesh on provided grid with dipole field values. Grid is in units 
+        of Re and magnetic field is is units of Gauss.
+    """
+    # Calculate dipole model
+    # ------------------------------------------------------------------------
+    # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
+    R_grid = np.sqrt(x_grid**2 + y_grid**2 + z_grid**2)
+
+    Bx = 3 * x_grid * z_grid * EARTH_DIPOLE_B0 / R_grid**5
+    By = 3 * y_grid * z_grid * EARTH_DIPOLE_B0 / R_grid**5
+    Bz = (3 * z_grid**2 - R_grid**2) * EARTH_DIPOLE_B0 / R_grid**5
+
+    # Create magnetic field model
+    # ------------------------------------------------------------------------
+    return MagneticFieldModel(
+        x_grid, y_grid, z_grid, Bx, By, Bz, inner_boundary=inner_boundary
+    )
+
+
 def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
@@ -212,23 +248,10 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
     """
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
-    X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
+    x_grid, y_grid, z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
 
-    # Calculate dipole model
-    # ------------------------------------------------------------------------
-    # Dipole model, per Kivelson and Russel equations 6.3(a)-(c), page 165.
-    R_grid = np.sqrt(X_grid**2 + Y_grid**2 + Z_grid**2)
-
-    Bx = 3 * X_grid * Z_grid * EARTH_DIPOLE_B0 / R_grid**5
-    By = 3 * Y_grid * Z_grid * EARTH_DIPOLE_B0 / R_grid**5
-    Bz = (3 * Z_grid**2 - R_grid**2) * EARTH_DIPOLE_B0 / R_grid**5
-
-    # Create magnetic field model
-    # ------------------------------------------------------------------------
-    return MagneticFieldModel(
-        X_grid, Y_grid, Z_grid, Bx, By, Bz, inner_boundary=LFM_INNER_BOUNDARY
-    )
-
+    return get_dipole_mesh_on_grid(x_grid, y_grid, z_grid, LFM_INNER_BOUNDARY)
+    
 
 def _get_fixed_lfm_grid_centers(
     lfm_hdf4_path: str,
@@ -241,57 +264,57 @@ def _get_fixed_lfm_grid_centers(
     Args
       lfm_hdf4_path: Path to LFM HDF4 file
     Returns
-      X_grid, Y_grid, Z_grid: arrays of LFM grid cell centers in units of Re
+      x_grid, y_grid, z_grid: arrays of LFM grid cell centers in units of Re
         with the x-axis singularity issue fixed.
     """
     # Read LFM grid from HDF file
     # ------------------------------------------------------------------------
     hdf = SD(lfm_hdf4_path, SDC.READ)
-    X_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("X_grid").get())
-    Y_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Y_grid").get())
-    Z_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Z_grid").get())
+    x_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("X_grid").get())
+    y_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Y_grid").get())
+    z_grid_raw = _fix_lfm_hdf4_array_order(hdf.select("Z_grid").get())
 
     # This code implements Josh Murphy's point2CellCenteredGrid() function
     # ------------------------------------------------------------------------
-    ni = X_grid_raw.shape[0] - 1
-    # nip1 = X_grid_raw.shape[0]
-    # nip2 = X_grid_raw.shape[0] + 1
+    ni = x_grid_raw.shape[0] - 1
+    # nip1 = x_grid_raw.shape[0]
+    # nip2 = x_grid_raw.shape[0] + 1
 
-    nj = X_grid_raw.shape[1] - 1
-    njp1 = X_grid_raw.shape[1]
-    njp2 = X_grid_raw.shape[1] + 1
+    nj = x_grid_raw.shape[1] - 1
+    njp1 = x_grid_raw.shape[1]
+    njp2 = x_grid_raw.shape[1] + 1
 
-    nk = X_grid_raw.shape[2] - 1
-    nkp1 = X_grid_raw.shape[2]
-    # nkp2 = X_grid_raw.shape[2] + 1
+    nk = x_grid_raw.shape[2] - 1
+    nkp1 = x_grid_raw.shape[2]
+    # nkp2 = x_grid_raw.shape[2] + 1
 
-    X_grid = np.zeros((ni, njp2, nkp1))
-    Y_grid = np.zeros((ni, njp2, nkp1))
-    Z_grid = np.zeros((ni, njp2, nkp1))
+    x_grid = np.zeros((ni, njp2, nkp1))
+    y_grid = np.zeros((ni, njp2, nkp1))
+    z_grid = np.zeros((ni, njp2, nkp1))
 
-    X_grid[:, 1:-1, :-1] = _calc_cell_centers(X_grid_raw)
-    Y_grid[:, 1:-1, :-1] = _calc_cell_centers(Y_grid_raw)
-    Z_grid[:, 1:-1, :-1] = _calc_cell_centers(Z_grid_raw)
+    x_grid[:, 1:-1, :-1] = _calc_cell_centers(x_grid_raw)
+    y_grid[:, 1:-1, :-1] = _calc_cell_centers(y_grid_raw)
+    z_grid[:, 1:-1, :-1] = _calc_cell_centers(z_grid_raw)
 
     for j in range(0, njp2, njp1):
         jAxis = max(1, min(nj, j))
         for i in range(ni):
-            X_grid[i, j, :-1] = X_grid[i, jAxis, :-1].mean()
-            Y_grid[i, j, :-1] = Y_grid[i, jAxis, :-1].mean()
-            Z_grid[i, j, :-1] = Z_grid[i, jAxis, :-1].mean()
+            x_grid[i, j, :-1] = x_grid[i, jAxis, :-1].mean()
+            y_grid[i, j, :-1] = y_grid[i, jAxis, :-1].mean()
+            z_grid[i, j, :-1] = z_grid[i, jAxis, :-1].mean()
 
-    X_grid[:, :, nk] = X_grid[:, :, 0]
-    Y_grid[:, :, nk] = Y_grid[:, :, 0]
-    Z_grid[:, :, nk] = Z_grid[:, :, 0]
+    x_grid[:, :, nk] = x_grid[:, :, 0]
+    y_grid[:, :, nk] = y_grid[:, :, 0]
+    z_grid[:, :, nk] = z_grid[:, :, 0]
 
     # Convert to units of earth radii (Re)
     # ------------------------------------------------------------------------
     # ignore typing here because MyPy doesn't work well with astropy
-    X_grid_re = (X_grid * units.cm).to(constants.R_earth).value  # type: ignore
-    Y_grid_re = (Y_grid * units.cm).to(constants.R_earth).value  # type: ignore
-    Z_grid_re = (Z_grid * units.cm).to(constants.R_earth).value  # type: ignore
+    x_grid_re = (x_grid * units.cm).to(constants.R_earth).value  # type: ignore
+    y_grid_re = (y_grid * units.cm).to(constants.R_earth).value  # type: ignore
+    z_grid_re = (z_grid * units.cm).to(constants.R_earth).value  # type: ignore
 
-    return X_grid_re, Y_grid_re, Z_grid_re
+    return x_grid_re, y_grid_re, z_grid_re
 
         
 def get_lfm_hdf4_data(lfm_hdf4_path: str) -> MagneticFieldModel:
@@ -310,7 +333,7 @@ def get_lfm_hdf4_data(lfm_hdf4_path: str) -> MagneticFieldModel:
     """
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
-    X_grid, Y_grid, Z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
+    x_grid, y_grid, z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
 
     # Read LFM B values from HDF file
     # ------------------------------------------------------------------------
@@ -326,9 +349,9 @@ def get_lfm_hdf4_data(lfm_hdf4_path: str) -> MagneticFieldModel:
     # Create Magnetic Field Model
     # ------------------------------------------------------------------------
     return MagneticFieldModel(
-        X_grid,
-        Y_grid,
-        Z_grid,
+        x_grid,
+        y_grid,
+        z_grid,
         Bx,
         By,
         Bz,
@@ -672,6 +695,84 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(
     )
 
 
+def get_igrf_on_grid(time: datetime, x_grid, y_grid, z_grid, inner_boundary):
+    """Evaluate the IGRF model on an arbitrary grid.
+
+    Parameters
+    ----------
+    time : datetime
+        Time to evaluate IGRF at.
+    x_grid : array of (m, n, p)
+        X coordinates of data, in SM coordiantes and units of Re
+    y_grid : array of (m, n, p)
+        Y coordinates of data, in SM coordiantes and units of Re
+    z_grid : array of (m, n, p)
+        Z coordinates of data, in SM coordiantes and units of Re
+    inner_boundary : float
+        Minimum radius to be considered too close to the earth for model to
+        cover.
+
+    Returns
+    -------
+    mesh : :py:class:`~MagneticFieldModel`
+        mesh with provided grid and IGRF field values. Grid is in units 
+        of Re and magnetic field is is units of Gauss.
+    """
+    # Call IGRF code
+    # ------------------------------------------------------------------------
+    time_tup = (
+        time.year,
+        int(time.strftime("%j")),
+        time.hour,
+        time.minute,
+        time.second,
+    )    
+    _geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
+
+    Bx, By, Bz = _geopack2008.igrfnumpy(
+        x_grid.flatten(), y_grid.flatten(), z_grid.flatten()
+    )
+
+    shape = x_grid.shape
+    Bx = nanoTesla2Gauss(Bx).reshape(shape)
+    By = nanoTesla2Gauss(By).reshape(shape)
+    Bz = nanoTesla2Gauss(Bz).reshape(shape)
+   
+    # Create magnetic field model
+    # ------------------------------------------------------------------------
+    return MagneticFieldModel(
+        x_grid, y_grid, z_grid, Bx, By, Bz,
+        inner_boundary=inner_boundary
+    )
+
+
+
+def get_igrf_on_lfm_grid(
+    time: datetime,
+    lfm_hdf4_path: str) -> MagneticFieldModel:        
+    """Calculate the IGRF magnetic field on an LFM grid. Uses an LFM HDF4 file
+    to obtain the grid.
+   
+    Parameters
+    ----------
+    time : datetime
+      Time to evaluate IGRF at
+    lfm_hdf4_path : str
+      Path to LFM file in HDF4 format
+
+    Returns
+    -------
+    mesh : :py:class:`~MagneticFieldModel`
+        Mesh on LFM grid with IGRF field values. Grid is in units of Re and
+        magnetic field is is units of Gauss
+    """
+    # Load LFM grid centers with singularity patched
+    # ------------------------------------------------------------------------
+    x_grid, y_grid, z_grid = _get_fixed_lfm_grid_centers(lfm_hdf4_path)
+
+    return get_igrf_on_grid(time, x_grid, y_grid, z_grid, LFM_INNER_BOUNDARY)
+
+
 def get_igrf_on_rectangular_grid(
     time: datetime,
     x_range: Tuple[float, float] = (-LFM_INNER_BOUNDARY, LFM_INNER_BOUNDARY),
@@ -680,10 +781,38 @@ def get_igrf_on_rectangular_grid(
     nx: int = 128,
     ny: int = 128,
     nz: int = 128,
-    range_padding : float = 0,
-    inner_boundary : float = 1.0,
-        
+    range_padding: float = 0,
+    inner_boundary: float = 1.0,
 ):
+    """Evaluate the IGRF model on a rectangular grid.
+
+    Parameters
+    ----------
+    time : datetime
+        Time to evaluate IGRF at.
+    x_range : tuple of (x_start, x_end) 
+        X-axis limits of the rectangular grid.
+    y_range : tuple of (y_start, y_end) 
+        Y-axis limits of the rectangular grid.
+    Z_range : tuple of (z_start, z_end) 
+        Z-axis limits of the rectangular grid.
+    nx : int
+        Number of x-axis points spanning the provided x_range.
+    ny : int
+        Number of y-axis points spanning the provided y_range.
+    nz : int
+        Number of z-axis points spanning the provided z_range.
+    range_paadding : float
+        Grows `x_range`, `y_range`, `z_range` by this amount.
+    inner_boundary : float
+        Inner boundary where field line traces should end.      
+
+    Returns
+    -------
+    mesh : :py:class:`~MagneticFieldModel`
+        mesh with provided grid and IGRF field values. Grid is in units 
+        of Re and magnetic field is is units of Gauss.
+    """
     # Prepare grid
     x_axis = np.linspace(
         x_range[0] - range_padding,
@@ -733,4 +862,36 @@ def get_igrf_on_rectangular_grid(
     return MagneticFieldModel(
         x_grid, y_grid, z_grid, Bx, By, Bz,
         inner_boundary=inner_boundary
+    )
+
+
+def sub_lfm_dipole_for_igrf(lfm_mesh, time):
+    """Substitute the internal dipole field model of an LFM mesh with
+    IGRF.
+
+    lfm_mesh : :py:class:`~MagneticFieldModel`
+      Mesh containning LFM field data on the LFM grid.
+    time : datetime
+      Time to evaluate IGRF at
+
+    Returns
+    -------
+    mesh : :py:class:`~MagneticFieldModel`
+        Mesh on same grid with dipole subtracted and replaced with IGRF
+        internal fields.
+    """
+    dip_mesh = get_dipole_mesh_on_grid(
+        lfm_mesh.x, lfm_mesh.y, lfm_mesh.z, lfm_mesh.inner_boundary
+    )
+    igrf_mesh = get_igrf_on_grid(
+        time, lfm_mesh.x, lfm_mesh.y, lfm_mesh.z, lfm_mesh.inner_boundary
+    )
+    
+    Bx = lfm_mesh.Bx - dip_mesh.Bx + igrf_mesh.Bx
+    By = lfm_mesh.By - dip_mesh.By + igrf_mesh.By
+    Bz = lfm_mesh.Bz - dip_mesh.Bz + igrf_mesh.Bz
+    
+    return MagneticFieldModel(
+        lfm_mesh.x, lfm_mesh.y, lfm_mesh.z,
+        Bx, By, Bz, lfm_mesh.inner_boundary
     )
