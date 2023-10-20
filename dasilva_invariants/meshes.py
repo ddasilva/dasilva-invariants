@@ -294,7 +294,7 @@ def _get_fixed_lfm_grid_centers(
 
     return X_grid_re, Y_grid_re, Z_grid_re
 
-        
+
 def get_lfm_hdf4_data(lfm_hdf4_path: str) -> MagneticFieldModel:
     """Get a magnetic field data + grid from LFM output. Uses an LFM HDF4 file.
 
@@ -603,7 +603,8 @@ def get_tsyganenko_params(
     mask = (df["Year"] > (min_year - 1)) & (df["Year"] < (max_year + 1))
     df = df[mask].copy()
     df["DateTime"] = [
-        datetime(int(row.Year), 1, 1) + timedelta(days=row.Day - 1, hours=row.Hr, minutes=row.Min)
+        datetime(int(row.Year), 1, 1)
+        + timedelta(days=row.Day - 1, hours=row.Hr, minutes=row.Min)
         for _, row in df.iterrows()
     ]
 
@@ -619,7 +620,7 @@ def get_tsyganenko_params(
         else:
             params_dict[col] = np.interp(
                 date2num(times_list), date2num(df.DateTime), df[col]
-            )        
+            )
 
     if tell_params:
         print(params_dict)

@@ -6,14 +6,13 @@ exceptions, which should be caught to detect problems which may occur during
 processing.
 """
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
-import sys
+from typing import Any, List, Optional, Tuple
 
 from ai import cs
 import numpy as np
 from numpy.typing import NDArray
 from scipy import interpolate
-from scipy.integrate import RK45
+from scipy.integrate import solve_ivp
 
 from . import utils
 from .meshes import MagneticFieldModel, FieldLineTrace
@@ -138,6 +137,8 @@ class CalculateLStarResult:
     integral_theta: NDArray[np.float64]
     # integral integrand
     integral_integrand: NDArray[np.float64]
+    # result of scipy.integrate.ivp_result
+    ivp_result: Any
 
 
 class FieldLineTraceInsufficient(RuntimeError):
@@ -309,14 +310,17 @@ def calculate_K(
 def calculate_LStar(
     mesh: MagneticFieldModel,
     starting_point: Tuple[float, float, float],
-    mode: str = "linear",
+    mode: str = "normal",
     num_local_times: int = 16,
     starting_mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
     starting_pitch_angle: Optional[float] = None,
+    integrand_atol: float = 0.01,
+    integrand_rtol: float = 0.01,
+    first_mlt_step: float = 2 * np.pi / 16,
+    max_mlt_step: float = 2 * np.pi / 4,
     major_step: float = 0.05,
     minor_step: float = 0.01,
-    interval_size_threshold: float = 0.05,
     rel_error_threshold: float = 0.01,
     max_iters: int = 300,
     trace_step_size: Optional[float] = None,
@@ -326,8 +330,9 @@ def calculate_LStar(
 ) -> CalculateLStarResult:
     """Calculate the third adiabatic invariant, L*
 
-    Can be run in two modes, 'linear' and 'bisection'. Linear mode is
-    slower, but gives better results for distributed magnetic fields.
+    Can be run in two modes, 'normal and 'equitorial'. The normal mode searches
+    for a drift shell by selecting a field line that matches K at each local
+    time; the equitorial mode matches Bmin at each local time.
 
     Parameters
     ----------
@@ -336,9 +341,8 @@ def calculate_LStar(
     starting_point : tuple of floats
         Starting point of the field line integration, as
         (x, y, z) tuple of floats, in units of Re
-    mode : {'linear', 'bisection'}, optional
-        Linear is more suiltable for non-quiet fields, but bisection may be
-        faster. Defaults to 'linear'
+    mode : {'normal', 'equitorial'}, optional
+        Mode to run drift shell search in.
     num_local_times : int, optional
         Number of local times spaced evenly around the drift shell to solve
         for with bisection
@@ -354,14 +358,10 @@ def calculate_LStar(
         where the drift shell is used by searching for isolines of Bmin instead
         of K
     major_step : float, optional
-        Only used by mode='linear'. Size of large step (float, units of Re)
-        to find rough location of drift shell radius
+        Size of large step (float, units of Re) to find rough location of drift
+        shell radius
     minor_step : float, optional
-        Only used by mode='linear'. Size of small step (float, units of Re)
-        to refine drift shell radius
-    interval_size_threshold : float, optional
-        Only used by mode='bisection'. Bisection threshold before linearly
-        interpolating
+         Size of small step (float, units of Re) to refine drift shell radius
     max_iters : int, optional
         Used by all modes. Maximum iterations before raising exception.
     trace_step_size : float, optional
@@ -370,7 +370,7 @@ def calculate_LStar(
         Interpolate intersection latitudes for local times with cubic splines
         to allow for less local time calculation
     interp_npoints : int, optional
-        Number of points to use in interplation, only active if
+        Number of points to usein interplation, only active if
         interp_local_times=True
     verbose : bool, optional
         Set to true to enable logging messages to console (stdout)
@@ -387,15 +387,8 @@ def calculate_LStar(
         x=starting_point[0], y=starting_point[1], z=0
     )
 
-    drift_local_times = starting_phi + (
-        2 * np.pi * np.arange(num_local_times) / num_local_times
-    )
-
     # Calculate K at the current local time.
     # ------------------------------------------------------------------------
-    if verbose:
-        print(f"Calculating drift radius 1/{drift_local_times.size}")
-
     if Bm is not None:
         kwargs = {"Bm": Bm}
     elif starting_mirror_latitude is not None:
@@ -411,78 +404,45 @@ def calculate_LStar(
         mesh, starting_point, step_size=trace_step_size, **kwargs  # type: ignore
     )
 
-    # Estimate radius of equivalent K/Bm at other local times using method
-    # based on whether the particle is equitorial mirroring or not (if it is,
-    # a trace is not required and can be skipped).
+    # Estimate radius of equivalent K/Bm at other local times at each local
+    # time determined by the RK45 method.
     # ------------------------------------------------------------------------
-    drift_shell_results = [(starting_rvalue, starting_result)]
+    drift_shell_results = {}
+    extra_args = dict(
+        Bm=starting_result.Bm,
+        default_rvalue=starting_rvalue,
+        drift_shell_results=drift_shell_results,
+        K=starting_result.K,
+        major_step=major_step,
+        max_iters=max_iters,
+        minor_step=minor_step,
+        mesh=mesh,
+        mode=mode,
+        trace_step_size=trace_step_size,
+    )
 
-    for i, local_time in enumerate(drift_local_times):
-        if i == 0:
-            continue
-        if verbose:
-            print(f"Calculating drift radius {i+1}/{drift_local_times.size}")
+    ivp_result = solve_ivp(
+        fun=_ivp_target_fun,
+        t_span=(0, 2 * np.pi),
+        y0=(0,),
+        method="RK45",
+        args=(extra_args,),
+        first_step=first_mlt_step,
+        max_step=max_mlt_step,
+        atol=integrand_atol,
+        rtol=integrand_rtol,
+    )
 
-        last_rvalue, _ = drift_shell_results[-1]
-
-        if mode == "linear":
-            if starting_pitch_angle == 90.0:
-                output = _linear_search_rvalue_by_Bmin(
-                    mesh,
-                    starting_result.Bm,
-                    last_rvalue,
-                    local_time,
-                    max_iters,
-                    trace_step_size,
-                    major_step,
-                    minor_step,
-                )
-            else:
-                output = _linear_search_rvalue_by_K(
-                    mesh,
-                    starting_result.K,
-                    starting_result.Bm,
-                    last_rvalue,
-                    local_time,
-                    max_iters,
-                    trace_step_size,
-                    major_step,
-                    minor_step,
-                )
-        elif mode == "bisection":
-            if starting_pitch_angle == 90.0:
-                raise NotImplementedError(
-                    "_bisect_search_rvalue_by_Bmin() not implemented"
-                )
-                # output = _bisect_search_rvalue_by_Bmin(
-                #    mesh, starting_result.Bm, starting_rvalue, local_time,
-                #    max_iters, trace_step_size, major_step, minor_step
-                # )
-            else:
-                output = _bisect_rvalue_by_K(
-                    mesh,
-                    starting_result.K,
-                    starting_result.Bm,
-                    last_rvalue,
-                    local_time,
-                    max_iters,
-                    interval_size_threshold,
-                    rel_error_threshold,
-                    trace_step_size,
-                )
-        else:
-            raise RuntimeError("Code should never reach here")
-
-        drift_shell_results.append(output)
+    drift_local_times = ivp_result.t
 
     # Extract drift shell results into arrays which correspond in index to
     # drift_local_times
     drift_rvalues: List[float] = []
     drift_K_results: List[CalculateKResult] = []
 
-    for i, (tmp_rvalue, tmp_result) in enumerate(drift_shell_results):
-        drift_rvalues.append(tmp_rvalue)
-        drift_K_results.append(tmp_result)
+    for local_time in drift_local_times:
+        drift_rvalues.append(drift_shell_results[local_time][0])
+        drift_K_results.append(drift_shell_results[local_time][1])
 
     # Calculate L*
     # This method assumes a dipole below the innery boundary, and integrates
@@ -499,31 +459,26 @@ def calculate_LStar(
         # Interpolate with cubic spline with periodic boundary condition
         # that forces the 1st and 2nd derivatives to be equal at the first
         # and last points
-        spline_x = np.zeros(len(drift_K_results) + 1)
-        spline_y = np.zeros(len(drift_K_results) + 1)
-
-        spline_x[:-1] = drift_local_times
-        spline_x[-1] = drift_local_times[0] + 2 * np.pi
-
-        spline_y[:-1] = trace_north_latitudes
-        spline_y[-1] = trace_north_latitudes[0]
-
+        spline_x = drift_local_times
+        spline_y = trace_north_latitudes
+        spline_y[-1] = spline_y[
+            0
+        ]  # required by CubicSpline, may be off due to num noise
         spline = interpolate.CubicSpline(spline_x, spline_y, bc_type="periodic")
 
         integral_axis = np.linspace(spline_x.min(), spline_x.max(), interp_npoints)
         # colatitude
         integral_theta = np.pi / 2 - spline(integral_axis).astype(float)
+
+        integral_integrand = np.sin(integral_theta) ** 2.0
+        integral = np.trapz(integral_integrand, integral_axis)
+
     else:
-        integral_axis = np.zeros(drift_local_times.size + 1)
-        integral_axis[:-1] = drift_local_times
-        integral_axis[-1] = integral_axis[0] + 2 * np.pi
+        integral_axis = ivp_result.t
+        integral_theta = None
+        integral_integrand = ivp_result.y
+        integral = ivp_result.y[0, -1]
 
-        integral_theta = np.zeros(len(drift_K_results) + 1)
-        integral_theta[:-1] = np.pi / 2 - trace_north_latitudes  # colatitude
-        integral_theta[-1] = integral_theta[0]
-
-    integral_integrand = np.sin(integral_theta) ** 2.0
-    integral = np.trapz(integral_integrand, integral_axis)
     LStar = 2 * np.pi * (inner_rvalue / surface_rvalue) / integral
 
     # Return results
@@ -542,6 +497,7 @@ def calculate_LStar(
         integral_axis=integral_axis,
         integral_theta=integral_theta,
         integral_integrand=integral_integrand,
+        ivp_result=ivp_result,
     )
 
 
@@ -955,3 +911,61 @@ def _test_drift_is_closed(drift_rvalues: NDArray[np.float64]) -> bool:
     is_closed = delta_rvalue_final < delta_rvalue_threshold
 
     return is_closed
+
+
+def _ivp_target_fun(local_time, current_state, extra_args):
+    """TODO: document this function"""
+    # Extract variables from function parameters
+    # ------------------------------------------------------------------------
+    Bm = extra_args["Bm"]
+    drift_shell_results = extra_args["drift_shell_results"]
+    K = extra_args["K"]
+    major_step = extra_args["major_step"]
+    max_iters = extra_args["max_iters"]
+    minor_step = extra_args["minor_step"]
+    mesh = extra_args["mesh"]
+    mode = extra_args["mode"]
+    trace_step_size = extra_args["trace_step_size"]
+
+    if drift_shell_results:
+        start_rvalue, _ = drift_shell_results[max(drift_shell_results.keys())]
+    else:
+        start_rvalue = extra_args["default_rvalue"]
+
+    # Perform core search for drift shell at this local time
+    # ------------------------------------------------------------------------
+    if mode == "normal":
+        output = _linear_search_rvalue_by_K(
+            mesh,
+            K,
+            Bm,
+            start_rvalue,
+            local_time,
+            max_iters,
+            trace_step_size,
+            major_step,
+            minor_step,
+        )
+    elif mode == "equitorial":
+        output = _linear_search_rvalue_by_Bmin(
+            mesh,
+            Bm,
+            start_rvalue,
+            local_time,
+            max_iters,
+            trace_step_size,
+            major_step,
+            minor_step,
+        )
+    else:
+        raise RuntimeError("Code should never reach here")
+
+    # Add to reference that accumulates CalculateKResult's (output variable)
+    # and return change in integral.
+    # ------------------------------------------------------------------------
+    drift_shell_results[local_time] = output
+
+    trace_north_latitude = output[1].trace_latitude.max()
+    integrand = np.sin(np.pi / 2 - trace_north_latitude) ** 2.0
+
+    return integrand

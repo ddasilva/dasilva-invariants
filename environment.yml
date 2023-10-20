@@ -11,7 +11,7 @@ dependencies:
     - cdflib
     - flake8
     - mypy
-    - numpy>=1.24
+    - numpy==1.24
     - pandas>=1.5.2
     - PyGeopack
     - pyhdf
