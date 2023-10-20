@@ -311,7 +311,6 @@ def calculate_LStar(
     mesh: MagneticFieldModel,
     starting_point: Tuple[float, float, float],
     mode: str = "normal",
-    num_local_times: int = 16,
     starting_mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
     starting_pitch_angle: Optional[float] = None,
@@ -343,9 +342,6 @@ def calculate_LStar(
         (x, y, z) tuple of floats, in units of Re
     mode : {'normal', 'equitorial'}, optional
         Mode to run drift shell search in.
-    num_local_times : int, optional
-        Number of local times spaced evenly around the drift shell to solve
-        for with bisection
     starting_mirror_latitude : float, optional
         Latitude in degrees to use for the mirroring point for the local time
         associated with the starting point to calculate drift shell
