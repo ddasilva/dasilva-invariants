@@ -16,6 +16,7 @@ docs/_build
 .Python
 env/
 build/
+_skbuild
 develop-eggs/
 dist/
 downloads/

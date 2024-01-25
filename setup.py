@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from numpy.distutils.core import setup, Extension
+from skbuild import setup
+import setuptools
+
 
 with open("README.md") as f:
     LONG_DESCRIPTION = f.read()
@@ -14,18 +16,6 @@ URL = 'https://dasilva-invariants.readthedocs.io/en/latest/'
 # VERSION should be PEP440 compatible (http://www.python.org/dev/peps/pep-0440)
 VERSION = '0.0.1'
 
-
-def _get_extension(name, funcs):
-    return Extension(
-        name=f"dasilva_invariants._fortran._{name}",
-        sources=[
-            f"dasilva_invariants/_fortran/{name}.f",
-            f"dasilva_invariants/_fortran/{name}_interface.f",
-        ],
-        f2py_options=["only:"] + list(funcs) + [":"]
-    )
-
-
 setup(
     name=PACKAGENAME,
     version=VERSION,
@@ -34,7 +24,9 @@ setup(
     author_email=AUTHOR_EMAIL,
     license=LICENSE,
     url=URL,
-    packages=['dasilva_invariants'],
+    packages=['dasilva_invariants',
+              'dasilva_invariants._fortran',
+    ],
     long_description=LONG_DESCRIPTION,
     include_package_data=True,
     classifiers=[
@@ -48,9 +40,15 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
+<<<<<<< HEAD
     ext_modules=[
         _get_extension("geopack2008", funcs=['recalc', 'force_dipole_tilt', 'dipnumpy']),
         _get_extension("t96", funcs=['t96numpy']),
         _get_extension("ts05", funcs=['ts05numpy']),
     ],    
+=======
+    package_data={
+        'dasilva_invariants': ['_fortran/*.so'],
+    },    
+>>>>>>> 6fe5761... Start of cmake rewrite + code upgrade
 )
