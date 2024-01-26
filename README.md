@@ -1,6 +1,5 @@
 Calculation of Adiabatic Invariants
 ---------------------------------------
-<img src="https://github.com/ddasilva/dasilva-invariants/actions/workflows/dasilva-invariants-ci.yml/badge.svg">
 
 This repository a library to calculate adiabatic invariants from LFM model output, as well as T96 and TS05 magnetic field models on the LFM grid. The library is provided through a python package "dasilva_invariants".
 
