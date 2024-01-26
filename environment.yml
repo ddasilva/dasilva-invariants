@@ -7,6 +7,7 @@ dependencies:
  - astropy>=5.1
  - cmake>=3.28.1
  - pandas>=1.5.2
+ - pytest   
  - pyvista
  - scipy>=1.9.3
  - scikit-build>=0.17.6

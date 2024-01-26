@@ -19,31 +19,38 @@ message("arrayobject.h dirname is ${arrayobjecth_dirname}")
 
 include_directories(${pythonh_dirname} ${arrayobjecth_dirname})
 
-set(custom_target_name "install")  # New name for the custom target
+# Function to copmile $tagname.f and $tagname_interface.f into python module
+# a la "from dasilva_invariants._fortran import $tagname".
+function(add_fortran_item tagname functions)
+  set(custom_target_name "install_${tagname}") 
+  set(f2py_module_name ${tagname})
+  set(fortran_src_file
+    ${CMAKE_CURRENT_SOURCE_DIR}/dasilva_invariants/_fortran/${tagname}.f
+    ${CMAKE_CURRENT_SOURCE_DIR}/dasilva_invariants/_fortran/${tagname}_interface.f
+  )
+  set(generated_module_file
+    ${CMAKE_CURRENT_BINARY_DIR}/${f2py_module_name}.so
+  )
+  add_custom_target(${custom_target_name} ALL DEPENDS ${generated_module_file})  
 
-# Geopack2008
-set(f2py_module_name "_geopack2008")
-
-set(fortran_src_file
-  ${CMAKE_CURRENT_SOURCE_DIR}/dasilva_invariants/_fortran/geopack2008.f
-  ${CMAKE_CURRENT_SOURCE_DIR}/dasilva_invariants/_fortran/geopack2008_interface.f
-)
-set(generated_module_file
-  ${CMAKE_CURRENT_BINARY_DIR}/${f2py_module_name}.so
-)
-add_custom_target(${custom_target_name} ALL DEPENDS ${generated_module_file})
-
-add_custom_command(
-  OUTPUT ${generated_module_file}
-  BUILD
-  COMMAND ${F2PY_EXECUTABLE}
+  # This is bad practice, but life is too short to figure out CMake
+  add_custom_command(
+    OUTPUT ${generated_module_file}
+    BUILD
+    COMMAND ${F2PY_EXECUTABLE}
     -m ${f2py_module_name}
     -c
     ${fortran_src_file}
-    only: recalc force_dipole_tilt dipnumpy :
+    only: ${functions} :
     && mv ${f2py_module_name}*.so ${generated_module_file}
     && mkdir -p ${CMAKE_INSTALL_PREFIX}/dasilva_invariants/_fortran
     && cp ${generated_module_file} ${CMAKE_INSTALL_PREFIX}/dasilva_invariants/_fortran
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+endfunction()
 
+add_fortran_item("geopack2008" "recalc force_dipole_tilt dipnumpy")
+add_fortran_item("t96" "t96numpy")
+add_fortran_item("ts05" "ts05numpy")
+
+add_custom_target(install ALL DEPENDS install_geopack2008 install_t96 install_ts05)
