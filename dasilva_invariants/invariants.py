@@ -16,7 +16,7 @@ from scipy import interpolate
 from scipy.integrate import RK45
 
 from . import utils
-from .meshes import MagneticFieldModel, FieldLineTrace
+from .models import MagneticFieldModel, FieldLineTrace
 
 
 __all__ = [
@@ -160,7 +160,7 @@ class DriftShellBisectionDoesntConverge(DriftShellSearchDoesntConverge):
 
 
 def calculate_K(
-    mesh: MagneticFieldModel,
+    model: MagneticFieldModel,
     starting_point: Tuple[float, float, float],
     mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
@@ -174,8 +174,8 @@ def calculate_K(
 
     Parameters
     ----------
-    mesh : :py:class:`~MagneticFieldModel`
-        Grid and magnetic field, loaded using meshes module
+    model : :py:class:`~MagneticFieldModel`
+        Grid and magnetic field, loaded using models module
     starting_point : tuple of floats
         Starting point of the field line trace, as (x, y, z) tuple of
         floats, in units of Re.
@@ -222,7 +222,7 @@ def calculate_K(
         step_size = 1e-3
 
     if reuse_trace is None:
-        trace = mesh.trace_field_line(starting_point, step_size)
+        trace = model.trace_field_line(starting_point, step_size)
     else:
         trace = reuse_trace
 
@@ -307,7 +307,7 @@ def calculate_K(
 
 
 def calculate_LStar(
-    mesh: MagneticFieldModel,
+    model: MagneticFieldModel,
     starting_point: Tuple[float, float, float],
     mode: str = "linear",
     num_local_times: int = 16,
@@ -331,8 +331,8 @@ def calculate_LStar(
 
     Parameters
     ----------
-    mesh : :py:class:`~MagneticFieldModel`
-        grid and magnetic field, loaded using meshes module
+    model : :py:class:`~MagneticFieldModel`
+        grid and magnetic field, loaded using models module
     starting_point : tuple of floats
         Starting point of the field line integration, as
         (x, y, z) tuple of floats, in units of Re
@@ -408,7 +408,7 @@ def calculate_LStar(
         )
 
     starting_result = calculate_K(
-        mesh, starting_point, step_size=trace_step_size, **kwargs  # type: ignore
+        model, starting_point, step_size=trace_step_size, **kwargs  # type: ignore
     )
 
     # Estimate radius of equivalent K/Bm at other local times using method
@@ -428,7 +428,7 @@ def calculate_LStar(
         if mode == "linear":
             if starting_pitch_angle == 90.0:
                 output = _linear_search_rvalue_by_Bmin(
-                    mesh,
+                    model,
                     starting_result.Bm,
                     last_rvalue,
                     local_time,
@@ -439,7 +439,7 @@ def calculate_LStar(
                 )
             else:
                 output = _linear_search_rvalue_by_K(
-                    mesh,
+                    model,
                     starting_result.K,
                     starting_result.Bm,
                     last_rvalue,
@@ -455,12 +455,12 @@ def calculate_LStar(
                     "_bisect_search_rvalue_by_Bmin() not implemented"
                 )
                 # output = _bisect_search_rvalue_by_Bmin(
-                #    mesh, starting_result.Bm, starting_rvalue, local_time,
+                #    model, starting_result.Bm, starting_rvalue, local_time,
                 #    max_iters, trace_step_size, major_step, minor_step
                 # )
             else:
                 output = _bisect_rvalue_by_K(
-                    mesh,
+                    model,
                     starting_result.K,
                     starting_result.Bm,
                     last_rvalue,
@@ -488,7 +488,7 @@ def calculate_LStar(
     # This method assumes a dipole below the innery boundary, and integrates
     # around the local times using stokes law with B = curl A.
     # -----------------------------------------------------------------------
-    inner_rvalue = mesh.inner_boundary
+    inner_rvalue = model.inner_boundary
     surface_rvalue = 1
 
     trace_north_latitudes = np.array(
@@ -546,7 +546,7 @@ def calculate_LStar(
 
 
 def _bisect_rvalue_by_K(
-    mesh: MagneticFieldModel,
+    model: MagneticFieldModel,
     target_K: float,
     Bm: float,
     starting_rvalue: float,
@@ -563,8 +563,8 @@ def _bisect_rvalue_by_K(
 
     Parameters
     ----------
-    mesh : :py:class:`~MagneticFieldModel`
-        Grid and magnetic field, loaded using meshes module
+    model : :py:class:`~MagneticFieldModel`
+        Grid and magnetic field, loaded using models module
     target_K : float
         K value to search for
     Bm : float
@@ -584,7 +584,7 @@ def _bisect_rvalue_by_K(
     -------
     rvalue : float
         Radius at given local time which produces the same K on he given
-        mesh
+        model
     calculate_K_result : :py:class:`~CalculateKResult`
         Value of K and field line trac information corresponding to final field
         line
@@ -597,7 +597,7 @@ def _bisect_rvalue_by_K(
     # Perform bisection method searching for K(Bm, r)
     # ------------------------------------------------------------------------
     upper_rvalue = starting_rvalue * 2
-    lower_rvalue = mesh.inner_boundary
+    lower_rvalue = model.inner_boundary
     current_rvalue = starting_rvalue
     history = []
 
@@ -615,10 +615,10 @@ def _bisect_rvalue_by_K(
             )
 
             lower_result = calculate_K(
-                mesh, lower_starting_point, Bm=Bm, step_size=step_size
+                model, lower_starting_point, Bm=Bm, step_size=step_size
             )
             upper_result = calculate_K(
-                mesh, upper_starting_point, Bm=Bm, step_size=step_size
+                model, upper_starting_point, Bm=Bm, step_size=step_size
             )
 
             # Interpolate between upper and lower bounds to find final rvalue
@@ -632,7 +632,7 @@ def _bisect_rvalue_by_K(
             )
 
             final_result = calculate_K(
-                mesh, final_starting_point, Bm=Bm, step_size=step_size
+                model, final_starting_point, Bm=Bm, step_size=step_size
             )
 
             return final_rvalue, final_result
@@ -643,7 +643,7 @@ def _bisect_rvalue_by_K(
         )
 
         current_result = calculate_K(
-            mesh, current_starting_point, Bm=Bm, step_size=step_size
+            model, current_starting_point, Bm=Bm, step_size=step_size
         )
 
         rel_error = abs(target_K - current_result.K) / max(
@@ -682,7 +682,7 @@ def _bisect_rvalue_by_K(
 
 
 def _linear_search_rvalue_by_Bmin(
-    mesh: MagneticFieldModel,
+    model: MagneticFieldModel,
     target_Bmin: float,
     initial_rvalue: float,
     local_time: float,
@@ -696,7 +696,7 @@ def _linear_search_rvalue_by_Bmin(
     Bmin.
 
     Args
-      mesh: reference to grid and magnetic field
+      model: reference to grid and magnetic field
       target_Bmin: floating point Bmin value to search for
       initial_rvalue: initial point rvalue (float)
       local_time: initial local time (radians, float)
@@ -708,7 +708,7 @@ def _linear_search_rvalue_by_Bmin(
 
     Returns
       rvalue: radius at given local time which produces the same K on
-        the given mesh (float)
+        the given model (float)
       calculate_K_result: instance of CalculateKResult corresponding to
         radius and calculate_K().
     Raises
@@ -717,7 +717,7 @@ def _linear_search_rvalue_by_Bmin(
     # Decide which direction to iterate --------------------------------------
     initial_point = utils.sp2cart_point(r=initial_rvalue, phi=-local_time, theta=0)
     initial_result = calculate_K(
-        mesh, initial_point, pitch_angle=90, step_size=step_size
+        model, initial_point, pitch_angle=90, step_size=step_size
     )
     initial_Bmin = initial_result.Bmin
 
@@ -742,7 +742,7 @@ def _linear_search_rvalue_by_Bmin(
         current_rvalue = initial_rvalue + i * major_step * direction
         current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
         current_result = calculate_K(
-            mesh, current_point, pitch_angle=90, step_size=step_size
+            model, current_point, pitch_angle=90, step_size=step_size
         )
         current_Bmin = current_result.Bmin
 
@@ -777,7 +777,7 @@ def _linear_search_rvalue_by_Bmin(
         current_rvalue = minor_start_rvalue + i * minor_step * direction
         current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
         current_result = calculate_K(
-            mesh, current_point, pitch_angle=90, step_size=step_size
+            model, current_point, pitch_angle=90, step_size=step_size
         )
         current_Bmin = current_result.Bmin
 
@@ -798,7 +798,7 @@ def _linear_search_rvalue_by_Bmin(
                 r=final_rvalue, phi=-local_time, theta=0
             )
             final_result = calculate_K(
-                mesh, final_initial_point, pitch_angle=90, step_size=step_size
+                model, final_initial_point, pitch_angle=90, step_size=step_size
             )
 
             return final_rvalue, final_result
@@ -813,7 +813,7 @@ def _linear_search_rvalue_by_Bmin(
 
 
 def _linear_search_rvalue_by_K(
-    mesh: MagneticFieldModel,
+    model: MagneticFieldModel,
     target_K: float,
     Bm: float,
     initial_rvalue: float,
@@ -828,7 +828,7 @@ def _linear_search_rvalue_by_K(
     K with the given Bmin.
 
     Args
-      mesh: reference to grid and magnetic field
+      model: reference to grid and magnetic field
       target_K: floating point K value to search for
       Bm: strength of magnetic field at mirror point, used to calcualte K
       initial_rvalue: initial point rvalue (float)
@@ -841,7 +841,7 @@ def _linear_search_rvalue_by_K(
 
     Returns
       rvalue: radius at given local time which produces the same K on
-        the given mesh (float)
+        the given model (float)
       calculate_K_result: instance of CalculateKResult corresponding to
         radius and calculate_K().
     Raises
@@ -853,7 +853,7 @@ def _linear_search_rvalue_by_K(
     # increasing rvalue.
     # ---------------------------------------------------------------------
     initial_point = utils.sp2cart_point(r=initial_rvalue, phi=-local_time, theta=0)
-    initial_result = calculate_K(mesh, initial_point, Bm=Bm, step_size=step_size)
+    initial_result = calculate_K(model, initial_point, Bm=Bm, step_size=step_size)
     initial_K = initial_result.K
 
     if Bm < initial_result.Bmin or initial_K == 0:
@@ -878,7 +878,7 @@ def _linear_search_rvalue_by_K(
     for i in range(1, max_iters + 1):
         current_rvalue = initial_rvalue + i * major_step * direction
         current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
-        current_result = calculate_K(mesh, current_point, Bm=Bm, step_size=step_size)
+        current_result = calculate_K(model, current_point, Bm=Bm, step_size=step_size)
         current_K = current_result.K
 
         history_rvalue.append(current_rvalue)
@@ -911,7 +911,7 @@ def _linear_search_rvalue_by_K(
     for i in range(1, max_iters + 1):
         current_rvalue = minor_start_rvalue + i * minor_step * direction
         current_point = utils.sp2cart_point(r=current_rvalue, phi=-local_time, theta=0)
-        current_result = calculate_K(mesh, current_point, Bm=Bm, step_size=step_size)
+        current_result = calculate_K(model, current_point, Bm=Bm, step_size=step_size)
         current_K = current_result.K
 
         history_rvalue.append(current_rvalue)
@@ -924,7 +924,7 @@ def _linear_search_rvalue_by_K(
             # Interpolate between upper and lower bounds to find final rvalue
             (final_rvalue,) = np.interp([target_K], history_K[-2:], history_rvalue[-2:])
             final_point = utils.sp2cart_point(r=final_rvalue, phi=-local_time, theta=0)
-            final_result = calculate_K(mesh, final_point, Bm=Bm, step_size=step_size)
+            final_result = calculate_K(model, final_point, Bm=Bm, step_size=step_size)
 
             return final_rvalue, final_result
 

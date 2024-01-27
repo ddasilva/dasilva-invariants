@@ -12,7 +12,7 @@ from scipy.stats import linregress
 
 from .insitu import InSituObservation
 from .invariants import calculate_K, calculate_LStar, CalculateLStarResult
-from .meshes import MagneticFieldModel
+from .models import MagneticFieldModel
 
 __all__ = ["CalculateLStarProfileResult", "calculate_LStar_profile"]
 
@@ -66,7 +66,7 @@ def calculate_LStar_profile(
     insitu_observation : :py:class:`~InSituObservation`
         Observational data accompanying this measurement
     mesh : :py:class:~MagneticFieldModel`
-        Grid and magnetic field, loaded using meshes module
+        Grid and magnetic field, loaded using models module
     particle : {'electron', 'proton'}
         Set the particle type, either 'electron' or 'proton'
     calculate_lstart_kwargs : dict

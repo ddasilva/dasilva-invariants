@@ -1,6 +1,6 @@
-"""Tools for obtaining meshes for use in calculating invariants.
+"""Tools for obtaining models for use in calculating invariants.
 
-Meshes are grids + magnetic field vectors at those grid points. They
+Models are grids + magnetic field vectors at those grid points. They
 are instances of :py:class:`~MagneticFieldModel`.
 
 In this module, all grids returned are in units of Re and all magnetic
@@ -14,12 +14,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import cdflib
 from matplotlib.dates import date2num
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import pandas as pd
 from pyhdf.SD import SD, SDC
-import pyvista
+import pyvista as pv
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import KDTree
 import vtk
@@ -32,8 +33,9 @@ from ._fortran import geopack2008, t96, ts05  # type:ignore
 __all__ = [
     "MagneticFieldModel",
     "FieldLineTrace",
-    "get_dipole_mesh_on_lfm_grid",
-    "get_lfm_hdf4_data",
+    "get_dipole_model_on_lfm_grid",
+    "get_lfm_hdf4_model",
+    "get_model",
     "get_tsyganenko_on_lfm_grid_with_auto_params",
     "get_tsyganenko_params",
 ]
@@ -101,7 +103,7 @@ class MagneticFieldModel:
         B[:, 0] = Bx.flatten(order="F")
         B[:, 1] = By.flatten(order="F")
         B[:, 2] = Bz.flatten(order="F")
-        self._mesh = pyvista.StructuredGrid(x, y, z)
+        self._mesh = pv.StructuredGrid(x, y, z)
         self._mesh.point_data["B"] = B
 
         R_grid, theta_grid, phi_grid = cs.cart2sp(x, y, z)
@@ -128,7 +130,7 @@ class MagneticFieldModel:
         trace : :py:class:`FieldLineTrace`
             Coordinates and magnetic field vector along the field line trace
         """
-        pyvista_trace = self._mesh.streamlines(
+        pv_trace = self._mesh.streamlines(
             "B",
             start_position=starting_point,
             terminal_speed=0.0,
@@ -140,7 +142,7 @@ class MagneticFieldModel:
             interpolator_type="c",
         )
 
-        return FieldLineTrace(points=pyvista_trace.points, B=pyvista_trace["B"])
+        return FieldLineTrace(points=pv_trace.points, B=pv_trace["B"])
 
     def interpolate(
         self, point: Tuple[float, float, float]
@@ -157,7 +159,7 @@ class MagneticFieldModel:
         B : tuple of floats
             Interpolated value of the mesh at given point.
         """
-        points_search = pyvista.PolyData(np.array([point]))
+        points_search = pv.PolyData(np.array([point]))
 
         interp = vtk.vtkPointInterpolator()  # linear interpolation
         interp.SetInputData(points_search)
@@ -165,7 +167,7 @@ class MagneticFieldModel:
         interp.GetKernel().SetRadius(0.1)        
         interp.Update()
 
-        interp_result = pyvista.PolyData(interp.GetOutput())
+        interp_result = pv.PolyData(interp.GetOutput())
         B = tuple(np.array(interp_result["B"])[0])
         B = cast(Tuple[float, float, float], B)
 
@@ -197,7 +199,7 @@ def _fix_lfm_hdf4_array_order(data):
     return data
 
 
-def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
+def get_dipole_model_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -208,7 +210,7 @@ def get_dipole_mesh_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
 
     Returns
     -------
-    mesh : :py:class:`~MagneticFieldModel`
+    model : :py:class:`~MagneticFieldModel`
         Mesh on LFM grid with dipole field values. Grid is in units of Re and
         magnetic field is is units of Gauss
     """
@@ -296,7 +298,7 @@ def _get_fixed_lfm_grid_centers(
     return X_grid_re, Y_grid_re, Z_grid_re
 
         
-def get_lfm_hdf4_data(lfm_hdf4_path: str) -> MagneticFieldModel:
+def get_lfm_hdf4_model(lfm_hdf4_path: str) -> MagneticFieldModel:
     """Get a magnetic field data + grid from LFM output. Uses an LFM HDF4 file.
 
     Parameters
@@ -306,7 +308,7 @@ def get_lfm_hdf4_data(lfm_hdf4_path: str) -> MagneticFieldModel:
 
     Returns
     --------
-    mesh : :py:class:`~MagneticFieldModel`
+    model : :py:class:`~MagneticFieldModel`
         Mesh on LFM grid with LFM magnetic field values. Grid is in units of Re
         and magnetic field is is units of Gauss
     """
@@ -446,7 +448,7 @@ def _get_tsyganenko_on_lfm_grid(
 
     Returns
     -------
-    mesh : :py:class:`~MagneticFieldModel`
+     model : :py:class:`~MagneticFieldModel`
         Magnetic model on LFM grid with dipole field values. Grid is in units of
         Re and magnetic field is is units of Gauss.
     """
@@ -661,7 +663,7 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(
 
     Returns
     -------
-    mesh : :py:class:`~MagneticFieldModel`
+    model : :py:class:`~MagneticFieldModel`
         Tsyganenko magnetic field model on LFM grid. Grid is in units of Re and magnetic
         field is is units of Gauss.
     """
@@ -672,3 +674,110 @@ def get_tsyganenko_on_lfm_grid_with_auto_params(
     return _get_tsyganenko_on_lfm_grid(
         model_name, params, time, lfm_hdf4_path, **kwargs
     )
+
+
+def get_swmf_cdf_model(
+    path,
+    xaxis=np.arange(-10, 10, .15),
+    yaxis=np.arange(-10, 10, .15),
+    zaxis=np.arange(-5, 5, .15)
+):
+    """Get a magnetic field data + grid from SWMF CDF output. This regrids it
+    to a rectilinear grid.
+
+    Parameters
+    -----------
+    path : str
+        Path to SWMF file in CDF format
+    xaxis: array
+        x-axis of rectilinear grid (default -10:.15:10)
+    yaxis: array
+        y-axis of rectilinear grid (default -10:.15:10)
+    zaxis: array
+        z-axis of rectilinear grid  (default -5:.15:5)
+
+    Returns
+    --------
+    model : :py:class:`~MagneticFieldModel`
+        Data on rectilinear grid with SWMF magnetic field values. Grid is in units 
+        of Re and magnetic field is is units of Gauss
+    """    
+    # Load data from CDF
+    cdf = cdflib.CDF(path)
+    
+    x = cdf.varget('x').flatten()
+    y = cdf.varget('y').flatten()
+    z = cdf.varget('z').flatten()
+    bx = nanoTesla2Gauss(cdf.varget('bx').flatten())
+    by = nanoTesla2Gauss(cdf.varget('by').flatten())
+    bz = nanoTesla2Gauss(cdf.varget('bz').flatten())
+    
+    # Calculate Dipole (data in file is external field)
+    r = np.sqrt(x**2 + y**2 + z**2)
+    bx_dipole = 3 * x * z * EARTH_DIPOLE_B0 / r**5
+    by_dipole = 3 * y * z * EARTH_DIPOLE_B0 / r**5
+    bz_dipole = (3 * z**2 - r**2) * EARTH_DIPOLE_B0 / r**5    
+    
+    # Interpolate onto rectilinear grid
+    X, Y, Z = np.meshgrid(xaxis, yaxis, zaxis)
+
+    point_cloud = pv.PolyData(np.transpose([x, y, z]))
+    point_cloud['Bx'] = bx + bx_dipole
+    point_cloud['By'] = by + by_dipole
+    point_cloud['Bz'] = bz + bz_dipole
+
+    points_search = pv.PolyData(np.transpose([X.flatten(), Y.flatten(), Z.flatten()]))
+    interp = vtk.vtkPointInterpolator()  # linear interpolation
+    interp.SetInputData(points_search)
+    interp.SetSourceData(point_cloud)
+    interp.GetKernel().SetRadius(0.1)
+    interp.Update()
+
+    interp_result = pv.PolyData(interp.GetOutput())
+    
+    # Make MagneticFieldModel
+    x_grid = interp_result.points[:, 0].reshape(X.shape)
+    y_grid = interp_result.points[:, 1].reshape(X.shape)
+    z_grid = interp_result.points[:, 2].reshape(X.shape)
+    r_grid = np.sqrt(x_grid**2 + y_grid**2 + z_grid**2)
+
+    Bx = interp_result['Bx'].reshape(X.shape)
+    By = interp_result['By'].reshape(X.shape)
+    Bz = interp_result['Bz'].reshape(X.shape)
+
+    inner_bdy = LFM_INNER_BOUNDARY
+    mask = r_grid < inner_bdy
+    Bx[mask] = np.nan
+    By[mask] = np.nan
+    Bz[mask] = np.nan    
+
+    return MagneticFieldModel(
+        x_grid, y_grid, z_grid, Bx, By, Bz,
+        inner_boundary=inner_bdy
+    )
+
+
+def get_model(model_type, path, **kwargs):
+    """Get a magnetic field model;
+
+    For specific keyword arguments see other functions in this model
+    that this common functions calls.
+
+    model_type : {"lfm_hdf4", "swmf_cdf"}
+       Type of the model
+    path : str
+       Path to file on disk
+
+    Returns
+    --------
+    model : :py:class:`~MagneticFieldModel`
+       Grid and Magnetic field values on that grid.
+    """
+    if model_type == "lfm_hdf4":
+        return get_lfm_hdf4_model(path)
+    if model_type == "swmf_cdf":
+        return get_swmf_cdf_model(path, **kwargs)
+    else:
+        raise TypeError(
+            f"Unknown model type {repr(model_type)}"
+        )
