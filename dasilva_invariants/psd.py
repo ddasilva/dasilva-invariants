@@ -51,7 +51,7 @@ def calculate_LStar_profile(
     fixed_mu: float,
     fixed_K: float,
     insitu_observation: InSituObservation,
-    mesh: MagneticFieldModel,
+    model: MagneticFieldModel,
     particle: str = "electron",
     calculate_lstar_kwargs: Dict[Any, Any] = {},
 ) -> CalculateLStarProfileResult:
@@ -65,7 +65,7 @@ def calculate_LStar_profile(
         Fixed second adiabatic invariant, units of sqrt(G) Re
     insitu_observation : :py:class:`~InSituObservation`
         Observational data accompanying this measurement
-    mesh : :py:class:~MagneticFieldModel`
+    model : :py:class:~MagneticFieldModel`
         Grid and magnetic field, loaded using models module
     particle : {'electron', 'proton'}
         Set the particle type, either 'electron' or 'proton'
@@ -101,7 +101,7 @@ def calculate_LStar_profile(
 
     for i, pitch_angle in enumerate(pitch_angles):
         result = calculate_K(
-            mesh,
+            model,
             insitu_observation.sc_position,
             pitch_angle=pitch_angle,
             reuse_trace=reuse_trace,
@@ -147,7 +147,7 @@ def calculate_LStar_profile(
     # Solve the quadratic equation, taking real root. See Green 2004 (Journal of
     # Geophysical Research), Step 3.
     # ------------------------------------------------------------------------
-    B = np.linalg.norm(mesh.interpolate(insitu_observation.sc_position))
+    B = np.linalg.norm(model.interpolate(insitu_observation.sc_position))
     B *= units.G
     fixed_mu_units = fixed_mu * units.MeV / units.G
     fixed_pitch_angle_rad = np.deg2rad(fixed_pitch_angle)
@@ -183,7 +183,7 @@ def calculate_LStar_profile(
     # Calculate L* paired with this measurement
     # ------------------------------------------------------------------------
     lstar_result = calculate_LStar(
-        mesh,
+        model,
         insitu_observation.sc_position,
         starting_pitch_angle=fixed_pitch_angle,
         **calculate_lstar_kwargs,
