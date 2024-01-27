@@ -443,7 +443,7 @@ def _get_tsyganenko_on_lfm_grid(
         Time to support the Tsyganenko magnetic field model
     lfm_hdf4_path : str
         Path to LFM file in HDF4 format to provide grid.
-    external_field_only : boopl
+    external_field_only : bool
         Set to True to not include the internal (dipole) model
 
     Returns
