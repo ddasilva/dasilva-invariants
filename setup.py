@@ -40,15 +40,7 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
-<<<<<<< HEAD
-    ext_modules=[
-        _get_extension("geopack2008", funcs=['recalc', 'force_dipole_tilt', 'dipnumpy']),
-        _get_extension("t96", funcs=['t96numpy']),
-        _get_extension("ts05", funcs=['ts05numpy']),
-    ],    
-=======
     package_data={
         'dasilva_invariants': ['_fortran/*.so'],
     },    
->>>>>>> 6fe5761... Start of cmake rewrite + code upgrade
 )

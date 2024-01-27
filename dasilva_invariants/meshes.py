@@ -26,7 +26,7 @@ import vtk
 
 from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
 from .utils import nanoTesla2Gauss
-from ._fortran import _geopack2008, _t96, _ts05  # type:ignore
+from ._fortran import geopack2008, t96, ts05  # type:ignore
 
 
 __all__ = [
@@ -162,6 +162,7 @@ class MagneticFieldModel:
         interp = vtk.vtkPointInterpolator()  # linear interpolation
         interp.SetInputData(points_search)
         interp.SetSourceData(self._mesh)
+        interp.GetKernel().SetRadius(0.1)        
         interp.Update()
 
         interp_result = pyvista.PolyData(interp.GetOutput())
@@ -473,19 +474,19 @@ def _get_tsyganenko_on_lfm_grid(
         time.second,
     )
 
-    _geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
+    geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
 
     if model_name == "T96":
-        Bx, By, Bz = _t96.t96numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+        Bx, By, Bz = t96.t96numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
     elif model_name == "TS05":
-        Bx, By, Bz = _ts05.ts05numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+        Bx, By, Bz = ts05.ts05numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
     else:
         raise ValueError(f"Invalid parameter model_name={repr(model_name)}")
 
     # Calculate dipole field for internal model,
     # ----------------------------------------------------------------------
     if not external_field_only:
-        Bx_dip, By_dip, Bz_dip = _geopack2008.dipnumpy(x_re_sm, y_re_sm, z_re_sm)
+        Bx_dip, By_dip, Bz_dip = geopack2008.dipnumpy(x_re_sm, y_re_sm, z_re_sm)
         Bx += Bx_dip
         By += By_dip
         Bz += Bz_dip
