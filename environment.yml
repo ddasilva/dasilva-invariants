@@ -6,6 +6,7 @@ dependencies:
  - numpy>=1.26.3 
  - astropy>=5.1
  - cmake>=3.28.1
+ - h5py>=3.10.0
  - pandas>=1.5.2
  - pytest   
  - pyvista
@@ -17,6 +18,7 @@ dependencies:
     - cdflib
     - flake8
     - mypy
+    - PyGeopack>=1.2.4
     - pyhdf
     - types-python-dateutil
 

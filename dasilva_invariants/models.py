@@ -6,15 +6,15 @@ are instances of :py:class:`~MagneticFieldModel`.
 In this module, all grids returned are in units of Re and all magnetic
 fields are in units of Gauss.
 """
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import cast, Dict, List, Optional, Tuple, Union
 
 from ai import cs
 from astropy import constants, units
-from collections.abc import Sequence
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-
 import cdflib
+import h5py
 from matplotlib.dates import date2num
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -64,11 +64,11 @@ class MagneticFieldModel:
 
     Attributes
     ----------
-    x_grid : array of (m, n, p)
+    x : array of (m, n, p)
         X coordinates of data, in SM coordiantes and units of Re
-    y_grid : array of (m, n, p)
+    y : array of (m, n, p)
         Y coordinates of data, in SM coordiantes and units of Re
-    z_grid : array of (m, n, p)
+    z : array of (m, n, p)
         Z coordinates of data, in SM coordiantes and units of Re
     Bx : array of (m, n, p)
         Magnetic field X component, in SM coordinates and units of Gauss
@@ -424,7 +424,108 @@ def _calc_cell_centers(A: NDArray[np.float64]) -> NDArray[np.float64]:
     return centers
 
 
-def _get_tsyganenko_on_lfm_grid(
+def get_tsyganenko(
+        model_name: str,
+        params: Dict[str, NDArray[np.float64]],
+        time: datetime,
+        x_re_sm_grid: NDArray[np.float64],
+        y_re_sm_grid: NDArray[np.float64],
+        z_re_sm_grid: NDArray[np.float64],
+        inner_boundary: float,
+        external_field_only: bool = False,
+) -> MagneticFieldModel:
+    """Internal helper function to get one of the tsyganenko fields on an LFM grid.
+
+    Parameters
+    -----------
+    model_name : {'T96', 'TS05'}
+        Name of the magnetic field model to use.
+    params : dictionary of string to array
+        Parameters to support Tsyganenko magnetic field mode
+    time : datetime, no timezone
+        Time to support the Tsyganenko magnetic field model
+    x_re_sm_grid : array of shame (m, n, p)
+        x coordinates
+    y_re_sm_grid : array of shame (m, n, p)
+        y coordinates
+    z_re_sm_grid : array of shame (m, n, p)
+        z coordinates
+    inner_boundary : float
+        Inner boundary of model
+    external_field_only : bool
+        Set to True to not include the internal (dipole) model
+
+    Returns
+    -------
+    model : :py:class:`~MagneticFieldModel`
+        Magnetic model on LFM grid with dipole field values. Grid is in units of
+        Re and magnetic field is is units of Gauss.
+    """
+    x_re_sm = x_re_sm_grid.flatten()  # flat arrays, easier for later
+    y_re_sm = y_re_sm_grid.flatten()
+    z_re_sm = z_re_sm_grid.flatten()
+
+    # Call compiled Tsyganenko fortran code  to get extenral field
+    parmod = (
+        params["Pdyn"],
+        params["dst"],
+        params["By"],
+        params["Bz"]
+    ) + tuple([params[f"W{i+1}"] for i in range(6)])
+
+    time_tup = (
+        time.year,
+        int(time.strftime("%j")),
+        time.hour,
+        time.minute,
+        time.second,
+    )
+
+    geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
+
+    if model_name.lower() == "t96":
+        Bx, By, Bz = t96.t96numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+    elif model_name.lower() == "ts05":
+        Bx, By, Bz = ts05.ts05numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+    else:
+        raise ValueError(f"Invalid parameter model_name={repr(model_name)}")
+
+    # Calculate dipole field for internal model,
+    if not external_field_only:
+        Bx_dip, By_dip, Bz_dip = geopack2008.dipnumpy(x_re_sm, y_re_sm, z_re_sm)
+        Bx += Bx_dip
+        By += By_dip
+        Bz += Bz_dip
+
+    # NaN out points under inner boundary
+    r_re_sm = np.sqrt(x_re_sm**2 + y_re_sm**2 + z_re_sm**2)
+    Bx[r_re_sm < inner_boundary] = np.nan
+    By[r_re_sm < inner_boundary] = np.nan
+    Bz[r_re_sm < inner_boundary] = np.nan
+    
+    # Convert from nT to Gauss
+    Bx = nanoTesla2Gauss(Bx)
+    By = nanoTesla2Gauss(By)
+    Bz = nanoTesla2Gauss(Bz)
+
+    # Create magnetic field model
+    shape = x_re_sm_grid.shape
+    Bx = Bx.reshape(shape)
+    By = By.reshape(shape)
+    Bz = Bz.reshape(shape)
+    
+    return MagneticFieldModel(
+        x_re_sm_grid,
+        y_re_sm_grid,
+        z_re_sm_grid,
+        Bx,
+        By,
+        Bz,
+        inner_boundary=inner_boundary
+    )
+
+
+def get_tsyganenko_on_lfm_grid(
     model_name: str,
     params: Dict[str, NDArray[np.float64]],
     time: datetime,
@@ -455,87 +556,39 @@ def _get_tsyganenko_on_lfm_grid(
 
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
-    X_re_sm_grid, Y_re_sm_grid, Z_re_sm_grid = _get_fixed_lfm_grid_centers(
+    x_re_sm_grid, y_re_sm_grid, z_re_sm_grid = _get_fixed_lfm_grid_centers(
         lfm_hdf4_path
     )
-
-    x_re_sm = X_re_sm_grid.flatten()  # flat arrays, easier for later
-    y_re_sm = Y_re_sm_grid.flatten()
-    z_re_sm = Z_re_sm_grid.flatten()
-
-    # Call compiled Tsyganenko fortran code  to get extenral field
-    # ------------------------------------------------------------------------
-    parmod = (params["Pdyn"], params["dst"], params["By"], params["Bz"]) + tuple(
-        [params[f"W{i+1}"] for i in range(6)]
-    )
-    time_tup = (
-        time.year,
-        int(time.strftime("%j")),
-        time.hour,
-        time.minute,
-        time.second,
-    )
-
-    geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
-
-    if model_name == "T96":
-        Bx, By, Bz = t96.t96numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
-    elif model_name == "TS05":
-        Bx, By, Bz = ts05.ts05numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
-    else:
-        raise ValueError(f"Invalid parameter model_name={repr(model_name)}")
-
-    # Calculate dipole field for internal model,
-    # ----------------------------------------------------------------------
-    if not external_field_only:
-        Bx_dip, By_dip, Bz_dip = geopack2008.dipnumpy(x_re_sm, y_re_sm, z_re_sm)
-        Bx += Bx_dip
-        By += By_dip
-        Bz += Bz_dip
-
-    # Convert from nT to Gauss
-    # ------------------------------------------------------------------------
-    Bx = nanoTesla2Gauss(Bx)
-    By = nanoTesla2Gauss(By)
-    Bz = nanoTesla2Gauss(Bz)
-
-    # Create magnetic field model
-    # ------------------------------------------------------------------------
-    shape = X_re_sm_grid.shape
-    Bx = Bx.reshape(shape)
-    By = By.reshape(shape)
-    Bz = Bz.reshape(shape)
-
-    return MagneticFieldModel(
-        X_re_sm_grid,
-        Y_re_sm_grid,
-        Z_re_sm_grid,
-        Bx,
-        By,
-        Bz,
+    
+    return get_tsyganenko(
+        model_name,
+        params,
+        time,
+        x_re_sm_grid,
+        y_re_sm_grid,
+        z_re_sm_grid,
         inner_boundary=LFM_INNER_BOUNDARY,
+        external_field_only=external_field_only,
     )
 
 
 def get_tsyganenko_params(
     times: Union[Sequence, datetime],
     path: str,
-    tell_params: bool = True,
+    skip_cache: bool = False,
     __T_AUTO_DL_CACHE: Dict[str, pd.DataFrame] = {},
 ) -> Dict[str, NDArray[np.float64]]:
     """Get parameters for tsyganenko models.
 
     Parameters
     -----------
-    times : List of datetime, no timezones
-        Times to get paramters for
+    times : datetime or list of datetime (no timezones)
+        Time(s) to get paramters for.
     path : str
         Path to zip file (may be URL if network enabled). It is fastest
         to download this file and save it to disk, but this URL may be passed
         automatically to download every time
         http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip
-    tell_params : bool, optional
-        If set to true, prints parameters to output
 
     Returns
     -------
@@ -551,13 +604,9 @@ def get_tsyganenko_params(
         assert isinstance(times, datetime)
         times_list = [times]
 
-    if path in __T_AUTO_DL_CACHE:
-        if tell_params:
-            print(f"Getting {path} from cache")
+    if path in __T_AUTO_DL_CACHE and not skip_cache:
         df = __T_AUTO_DL_CACHE[path]
     else:
-        if tell_params:
-            print(f"Loading {path}")
         # ignore typing here because pandas broken
         df = pd.read_csv(
             path,
@@ -624,63 +673,14 @@ def get_tsyganenko_params(
                 date2num(times_list), date2num(df.DateTime), df[col]
             )        
 
-    if tell_params:
-        print(params_dict)
-
     return params_dict
 
 
-def get_tsyganenko_on_lfm_grid_with_auto_params(
-    model_name: str,
-    time: datetime,
-    lfm_hdf4_path: str,
-    param_path: str,
-    tell_params: bool = True,
-    **kwargs,
-) -> MagneticFieldModel:
-    """Get a Tsyganenko field on a LFM grid. Uses an LFM HDF4 file to obtain
-    the grid.
-
-    Parameters
-    ----------
-    model_name : {'T96', 'TS05'}
-        Name of the magnetic field model to use.
-    time : datetime, no timezone
-        Time to support the Tsyganenko magnetic field model
-    lfm_hdf4_path : str
-        Path to LFM file in HDF4 format to provide grid.
-    params_path : str
-        Path to OMNI records file, can be URL to download. This file can be
-        downloaded from http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip
-    tell_params : bool, optional
-        Print OMNI paramteters retreived to standard output
-    external_field_only : boo, optional
-        Set to True to not include the internal (dipole) model
-    force_zero_tilt : bool, optional
-        Force a zero tilt when calculating the magnetic field
-    n_jobs : int, optional
-        Number of parallel processes to use (-1 for all available cores)
-
-    Returns
-    -------
-    model : :py:class:`~MagneticFieldModel`
-        Tsyganenko magnetic field model on LFM grid. Grid is in units of Re and magnetic
-        field is is units of Gauss.
-    """
-    # Lookup params  -----------------------------------------------
-    params = get_tsyganenko_params(time, param_path, tell_params=tell_params)
-
-    # Call model using parameters
-    return _get_tsyganenko_on_lfm_grid(
-        model_name, params, time, lfm_hdf4_path, **kwargs
-    )
-
-
 def get_swmf_cdf_model(
-    path,
-    xaxis=np.arange(-10, 10, .15),
-    yaxis=np.arange(-10, 10, .15),
-    zaxis=np.arange(-5, 5, .15)
+    path: str,
+    xaxis: NDArray[np.float64] =np.arange(-10, 10, .15),
+    yaxis: NDArray[np.float64] = np.arange(-10, 10, .15),
+    zaxis: NDArray[np.float64] = np.arange(-5, 5, .15)
 ):
     """Get a magnetic field data + grid from SWMF CDF output. This regrids it
     to a rectilinear grid.
@@ -757,14 +757,30 @@ def get_swmf_cdf_model(
     )
 
 
+def get_generic_hdf5_model(path):
+    hdf = h5py.File(path)
+    x = hdf['x'][:]
+    y = hdf['y'][:]
+    z = hdf['z'][:]
+    Bx = hdf['Bx'][:]
+    By = hdf['By'][:]
+    Bz = hdf['Bz'][:]
+    inner_boundary = hdf['inner_boundary'][()]
+    hdf.close()
+
+    return MagneticFieldModel(
+        x, y, z, Bx, By, Bz, inner_boundary
+    )
+
+
 def get_model(model_type, path, **kwargs):
     """Get a magnetic field model;
 
     For specific keyword arguments see other functions in this model
     that this common functions calls.
 
-    model_type : {"lfm_hdf4", "swmf_cdf"}
-       Type of the model
+    model_type : {"lfm_hdf4", "swmf_cdf", "generic_hdf5"}
+       Type of the model (case insensitive)
     path : str
        Path to file on disk
 
@@ -773,10 +789,14 @@ def get_model(model_type, path, **kwargs):
     model : :py:class:`~MagneticFieldModel`
        Grid and Magnetic field values on that grid.
     """
+    model_type = model_type.lower()
+    
     if model_type == "lfm_hdf4":
         return get_lfm_hdf4_model(path)
-    if model_type == "swmf_cdf":
+    elif model_type == "swmf_cdf":
         return get_swmf_cdf_model(path, **kwargs)
+    elif model_type == "generic_hdf5":
+        return get_generic_hdf5_model(path, **kwargs)
     else:
         raise TypeError(
             f"Unknown model type {repr(model_type)}"

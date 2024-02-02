@@ -70,8 +70,6 @@ def get_rbsp_electron_level3(hdf_path) -> List[InSituObservation]:
     pitch_angles = cdf.varget("FEDU_Alpha")
     sc_positions_geo = (cdf.varget("Position") * units.km).to(R_earth).value
 
-    cdf.close()
-
     # Convert spacecraft positions to sm coordinate system
     x_geo, y_geo, z_geo = sc_positions_geo.T
     dates = [int(time.strftime("%Y%m%d")) for time in times]

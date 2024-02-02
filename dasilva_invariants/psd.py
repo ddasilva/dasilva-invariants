@@ -3,6 +3,7 @@ outlined for this task in `Green and Kivelson, 2004 <https://doi.org/10.1029/200
 """
 from dataclasses import dataclass
 from typing import Any, Dict
+import warnings
 
 from astropy.constants import R_earth, m_e, m_p, c
 from astropy import units
@@ -171,7 +172,10 @@ def calculate_LStar_profile(
     fit = linregress(fit_x, fit_y)
 
     fixed_E_unitless = fixed_E.to(units.keV).value
-    f_final = 10 ** (fit.slope * np.log10(fixed_E_unitless) + fit.intercept)
+
+    with warnings.catch_warnings(action="ignore"):
+        f_final = 10 ** (fit.slope * np.log10(fixed_E_unitless) + fit.intercept)
+
     f_final *= f_step2.unit  # type: ignore
 
     # Convert f_final to proper phase space density units
