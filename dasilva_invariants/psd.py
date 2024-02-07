@@ -61,7 +61,7 @@ def calculate_LStar_profile(
     Parameters
     ----------
     mu : float
-        F ixed first adiabatic invariant, units of MeV/G
+        Fixed first adiabatic invariant, units of MeV/G
     K : float
         Fixed second adiabatic invariant, units of sqrt(G) Re
     insitu_observation : :py:class:`~InSituObservation`
@@ -169,8 +169,8 @@ def calculate_LStar_profile(
     # in linear space.
     fit_x = np.log10(energies[mask].to(units.keV).value)
     fit_y = np.log10(f_step2[mask].value)  # type: ignore
-    fit = linregress(fit_x, fit_y)
 
+    fit = linregress(fit_x, fit_y)
     fixed_E_unitless = fixed_E.to(units.keV).value
 
     with warnings.catch_warnings(action="ignore"):

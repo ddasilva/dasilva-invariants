@@ -61,7 +61,7 @@ def get_rbsp_electron_level3(hdf_path) -> List[InSituObservation]:
     cdf = cdflib.CDF(hdf_path)
     times = np.array(
         [
-            datetime(1, 1, 1) + timedelta(days=-1, milliseconds=dt)
+            datetime(1, 1, 1) + timedelta(days=-366, milliseconds=dt)
             for dt in cdf.varget("Epoch")
         ]
     )
