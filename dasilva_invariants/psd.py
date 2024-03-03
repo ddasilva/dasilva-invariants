@@ -2,14 +2,18 @@
 outlined for this task in `Green and Kivelson, 2004 <https://doi.org/10.1029/2003JA01015>`_.
 """
 from dataclasses import dataclass
+import os
 from typing import Any, Dict
 import warnings
+
 
 from astropy.constants import R_earth, m_e, m_p, c
 from astropy import units
 import numpy as np
 from numpy.typing import NDArray
+from scipy.interpolate import CubicSpline
 from scipy.stats import linregress
+
 
 from .insitu import InSituObservation
 from .invariants import calculate_K, calculate_LStar, CalculateLStarResult
@@ -18,9 +22,13 @@ from .models import MagneticFieldModel
 __all__ = ["CalculateLStarProfileResult", "calculate_LStar_profile"]
 
 
+class UnableToCalculatePSD(Exception):
+    """Generic exception for being unable to calcualte PSD"""
+
+
 @dataclass
 class CalculateLStarProfileResult:
-    """Phase space density (PSD) observation, f(L*) and its associated L*.
+    """Phase space density (PSD) observation, f(L*) and its associated L*. 
 
     Parameters
     -----------
@@ -44,9 +52,13 @@ class CalculateLStarProfileResult:
     LStar: float
     lstar_result: CalculateLStarResult
     fixed_mu: float
-    fixed_K: float
+    fixed_K: float    
+    fixed_E: float
+    pitch_angle: float
+    B: float
     particle: str
 
+    
 
 def calculate_LStar_profile(
     fixed_mu: float,
@@ -112,72 +124,86 @@ def calculate_LStar_profile(
 
     # Interpolate monotonic subject of pitch angle vs K curve to find solution
     # of this code section.
-    mask = pitch_angles <= 90
+    mask = (pitch_angles <= 90) & (Ks > 0)
     I = np.argsort(Ks[mask])
 
-    (fixed_pitch_angle,) = np.interp([fixed_K], Ks[mask][I], pitch_angles[mask][I])
-
-    # Compute and interpolate phase space density at fixed K, for each energy.
-    #
-    # Uses equation f = j / p^2, where
-    #   f is phase space density
-    #   j is flux
-    #   p is momentum
-    #  -----------------------------------------------------------------------
-    f_step2 = np.zeros(energies.size, dtype=float)
+    if mask.sum() > 2:
+        fit_x = np.log10(Ks[mask][I])
+        fit_y = pitch_angles[mask][I]
+        #fixed_pitch_angle = np.interp(np.log10(fixed_K), fit_x, fit_y)        
+        fit = CubicSpline(fit_x, fit_y)
+        fixed_pitch_angle = float(fit(np.log10(fixed_K)))
+    else:
+        raise UnableToCalculatePSD()
+    
+    # Compute and interpolate flux at fixed K, for each energy.
+    # -----------------------------------------------------------------------
+    flux_step2 = np.zeros(energies.size, dtype=float)
     mass = {"electron": m_e, "proton": m_p}[particle]
 
     for i in range(energies.size):
         E = energies[i]
-        p_squared = (E**2 + 2 * mass * c**2 * E) / c**2  # relativistic
         mask = flux[:, i] > 0
 
         if mask.any():
-            f_step2[i] = np.interp(
+            fit_x = pitch_angles[mask]
+            fit_y = flux[:, i][mask].value
+            flux_step2[i] = np.interp(
                 fixed_pitch_angle,
-                pitch_angles[mask],
-                (flux[:, i][mask] / p_squared).value,
-            )
+                fit_x, fit_y
+            )            
+            #fit = CubicSpline(fit_x, fit_y)
+            #flux_step2[i] = fit(fixed_pitch_angle)
         else:
-            f_step2[i] = np.nan
+            flux_step2[i] = np.nan
 
-    f_step2 *= flux[:, 0].unit / p_squared.unit
+    flux_step2 *= flux[:, 0].unit 
 
     # Find fixed E associated with the first adiabatic invariant (fixed_mu)
     #
     # Solve the quadratic equation, taking real root. See Green 2004 (Journal of
     # Geophysical Research), Step 3.
     # ------------------------------------------------------------------------
-    B = np.linalg.norm(model.interpolate(insitu_observation.sc_position))
-    B *= units.G
+    #B = np.linalg.norm(model.interpolate(insitu_observation.sc_position)) * units.G
+    #B = insitu_observation.Bmodel * units.G
+    B = insitu_observation.Bobs * units.G
+    
     fixed_mu_units = fixed_mu * units.MeV / units.G
     fixed_pitch_angle_rad = np.deg2rad(fixed_pitch_angle)
 
     a = 1 / c**2
-    b = 2 * m_e
-    c_ = -2 * m_e * B * fixed_mu_units / np.sin(fixed_pitch_angle_rad) ** 2
+    b = 2 * mass
+    c_ = -2 * mass * B * fixed_mu_units / np.sin(fixed_pitch_angle_rad) ** 2
 
     fixed_E = (-b + np.sqrt(np.square(b) - 4 * a * c_)) / (2 * a)
     fixed_E = fixed_E.to(units.MeV)
 
-    # Interpolate the f_step2(E) structure at the fixed energy associated with
-    # fixed_mu. Fit f_step2(E) to power law dist, the find f_step2(fixed_E).
+    # Interpolate the flux_step2(E) structure at the fixed energy associated with
+    # fixed_mu. Fit flux_step2(E) to power law dist, the find flux(fixed_E).
     # ------------------------------------------------------------------------
-    mask = np.isfinite(f_step2)
+    mask = np.isfinite(flux_step2)
 
     # A linear regression of two log-space variables is a power law relation
     # in linear space.
-    fit_x = np.log10(energies[mask].to(units.keV).value)
-    fit_y = np.log10(f_step2[mask].value)  # type: ignore
-    fit = linregress(fit_x, fit_y)
-
-    fixed_E_unitless = fixed_E.to(units.keV).value
-
     with warnings.catch_warnings(action="ignore"):
-        f_final = 10 ** (fit.slope * np.log10(fixed_E_unitless) + fit.intercept)
-
-    f_final *= f_step2.unit  # type: ignore
-
+        fit_x = np.log10(energies[mask].to(units.keV).value)
+        fit_y = np.log10(flux_step2[mask].value)  # type: ignore
+        
+    fit_mask = np.isfinite(fit_x) & np.isfinite(fit_y)
+    #fit = np.poly1d(np.polyfit(fit_x, fit_y, 1))
+    fit = CubicSpline(fit_x[fit_mask], fit_y[fit_mask])    
+    fixed_E_unitless = fixed_E.to(units.keV).value
+    
+    with warnings.catch_warnings(action="ignore"):
+        try:
+            flux_final = 10 ** float(fit(np.log10(fixed_E_unitless)))
+        except:
+            flux_final = np.nan
+            
+    flux_final *= flux_step2.unit  # type: ignore
+    p_squared = (fixed_E**2 + 2 * mass * c**2 * fixed_E) / c**2  # relativistic     
+    f_final = flux_final / p_squared
+    
     # Convert f_final to proper phase space density units
     momentum_units = units.g * units.nm / units.s
     psd_units = 1 / (momentum_units * units.nm) ** 3
@@ -186,18 +212,31 @@ def calculate_LStar_profile(
 
     # Calculate L* paired with this measurement
     # ------------------------------------------------------------------------
-    lstar_result = calculate_LStar(
-        model,
-        insitu_observation.sc_position,
-        starting_pitch_angle=fixed_pitch_angle,
-        **calculate_lstar_kwargs,
-    )
-
+    cache_key = insitu_observation.time.isoformat()
+    cache_fname = f'cache/{cache_key}.txt'
+    
+    if os.path.exists(cache_fname):
+        lstar_result = None
+        LStar = float(open(cache_fname).read())
+    else:
+        lstar_result = calculate_LStar(
+            model,
+            insitu_observation.sc_position,
+            starting_pitch_angle=fixed_pitch_angle,
+            **calculate_lstar_kwargs,
+        )
+        LStar = lstar_result.LStar
+        with open(cache_fname, 'w') as fh:
+            fh.write(str(LStar))
+        
     return CalculateLStarProfileResult(
         phase_space_density=phase_space_density,
-        LStar=lstar_result.LStar,
+        LStar=LStar,
         lstar_result=lstar_result,
         fixed_mu=fixed_mu,
         fixed_K=fixed_K,
+        fixed_E=fixed_E_unitless,
+        pitch_angle=fixed_pitch_angle,
+        B=B.value,
         particle=particle,
     )

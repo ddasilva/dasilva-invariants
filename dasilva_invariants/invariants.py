@@ -256,7 +256,8 @@ def calculate_K(
         )
     elif pitch_angle is not None:
         tmp = np.array([pitch_angle])
-        (Bm,) = Bmin / np.sin(np.deg2rad(tmp)) ** 2
+        Blocal = np.linalg.norm(model.interpolate(starting_point))
+        (Bm,) = Blocal / np.sin(np.deg2rad(tmp)) ** 2
     elif Bm is None:
         raise RuntimeError("This code should not be reachable")
 

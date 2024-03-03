@@ -145,7 +145,7 @@ class MagneticFieldModel:
         return FieldLineTrace(points=pv_trace.points, B=pv_trace["B"])
 
     def interpolate(
-        self, point: Tuple[float, float, float]
+        self, point: Tuple[float, float, float], radius=0.5,
     ) -> Tuple[float, float, float]:
         """Linearly interpolate mesh to find magnetic field at given point.
 
@@ -164,7 +164,7 @@ class MagneticFieldModel:
         interp = vtk.vtkPointInterpolator()  # linear interpolation
         interp.SetInputData(points_search)
         interp.SetSourceData(self._mesh)
-        interp.GetKernel().SetRadius(0.1)        
+        interp.GetKernel().SetRadius(radius)        
         interp.Update()
 
         interp_result = pv.PolyData(interp.GetOutput())
@@ -730,7 +730,7 @@ def get_swmf_cdf_model(
     interp = vtk.vtkPointInterpolator()  # linear interpolation
     interp.SetInputData(points_search)
     interp.SetSourceData(point_cloud)
-    interp.GetKernel().SetRadius(0.1)
+    interp.GetKernel().SetRadius(0.25)
     interp.Update()
 
     interp_result = pv.PolyData(interp.GetOutput())
