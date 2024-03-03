@@ -164,6 +164,7 @@ def calculate_K(
     starting_point: Tuple[float, float, float],
     mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
+    Blocal = None,
     pitch_angle: Optional[float] = None,
     step_size: Optional[float] = None,
     reuse_trace: Optional[FieldLineTrace] = None,
@@ -256,7 +257,8 @@ def calculate_K(
         )
     elif pitch_angle is not None:
         tmp = np.array([pitch_angle])
-        Blocal = np.linalg.norm(model.interpolate(starting_point))
+        if Blocal is None:
+            Blocal = np.linalg.norm(model.interpolate(starting_point))
         (Bm,) = Blocal / np.sin(np.deg2rad(tmp)) ** 2
     elif Bm is None:
         raise RuntimeError("This code should not be reachable")
@@ -314,6 +316,7 @@ def calculate_LStar(
     num_local_times: int = 16,
     starting_mirror_latitude: Optional[float] = None,
     Bm: Optional[float] = None,
+    Blocal = None,
     starting_pitch_angle: Optional[float] = None,
     major_step: float = 0.05,
     minor_step: float = 0.01,
@@ -403,6 +406,8 @@ def calculate_LStar(
         kwargs = {"mirror_latitude": starting_mirror_latitude}
     elif starting_pitch_angle is not None:
         kwargs = {"pitch_angle": starting_pitch_angle}
+        if Blocal is not None:
+            kwargs['Blocal'] = Blocal
     else:
         raise RuntimeError(
             "Must specify one of Bm=, starting_mirror_latitude=, or " "pitch_angle="

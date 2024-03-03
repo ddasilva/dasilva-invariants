@@ -11,7 +11,7 @@ from astropy.constants import R_earth, m_e, m_p, c
 from astropy import units
 import numpy as np
 from numpy.typing import NDArray
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import CubicSpline, make_smoothing_spline
 from scipy.stats import linregress
 
 
@@ -97,6 +97,11 @@ def calculate_LStar_profile(
         "proton",
     ), f"calculate_LStar_profile(): Invalid particle {repr(particle)}"
 
+    # Decide on B -------------------------------------------------------------
+    #B = np.linalg.norm(model.interpolate(insitu_observation.sc_position)) * units.G
+    #B = insitu_observation.Bmodel * units.G
+    B = insitu_observation.Bobs * units.G
+    
     # Extract variables from insitu_observation into local namespace with untis
     flux_units = 1 / (units.cm**2 * units.s * units.keV)  # also per ster
 
@@ -118,6 +123,7 @@ def calculate_LStar_profile(
             insitu_observation.sc_position,
             pitch_angle=pitch_angle,
             reuse_trace=reuse_trace,
+            Blocal=B.value,
         )
         Ks[i] = result.K
         reuse_trace = result._trace
@@ -135,6 +141,9 @@ def calculate_LStar_profile(
         fixed_pitch_angle = float(fit(np.log10(fixed_K)))
     else:
         raise UnableToCalculatePSD()
+
+    if fixed_pitch_angle > 90 or fixed_pitch_angle < 0:
+        raise UnableToCalculatePSD()        
     
     # Compute and interpolate flux at fixed K, for each energy.
     # -----------------------------------------------------------------------
@@ -164,9 +173,6 @@ def calculate_LStar_profile(
     # Solve the quadratic equation, taking real root. See Green 2004 (Journal of
     # Geophysical Research), Step 3.
     # ------------------------------------------------------------------------
-    #B = np.linalg.norm(model.interpolate(insitu_observation.sc_position)) * units.G
-    #B = insitu_observation.Bmodel * units.G
-    B = insitu_observation.Bobs * units.G
     
     fixed_mu_units = fixed_mu * units.MeV / units.G
     fixed_pitch_angle_rad = np.deg2rad(fixed_pitch_angle)
@@ -179,12 +185,9 @@ def calculate_LStar_profile(
     fixed_E = fixed_E.to(units.MeV)
 
     # Interpolate the flux_step2(E) structure at the fixed energy associated with
-    # fixed_mu. Fit flux_step2(E) to power law dist, the find flux(fixed_E).
+    # fixed_mu.
     # ------------------------------------------------------------------------
     mask = np.isfinite(flux_step2)
-
-    # A linear regression of two log-space variables is a power law relation
-    # in linear space.
     with warnings.catch_warnings(action="ignore"):
         fit_x = np.log10(energies[mask].to(units.keV).value)
         fit_y = np.log10(flux_step2[mask].value)  # type: ignore
@@ -223,6 +226,7 @@ def calculate_LStar_profile(
             model,
             insitu_observation.sc_position,
             starting_pitch_angle=fixed_pitch_angle,
+            Blocal=B.value,
             **calculate_lstar_kwargs,
         )
         LStar = lstar_result.LStar
