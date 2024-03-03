@@ -194,7 +194,8 @@ def calculate_LStar_profile(
         
     fit_mask = np.isfinite(fit_x) & np.isfinite(fit_y)
     #fit = np.poly1d(np.polyfit(fit_x, fit_y, 1))
-    fit = CubicSpline(fit_x[fit_mask], fit_y[fit_mask])    
+    #fit = CubicSpline(fit_x[fit_mask], fit_y[fit_mask])
+    fit = make_smoothing_spline(fit_x[fit_mask], fit_y[fit_mask])
     fixed_E_unitless = fixed_E.to(units.keV).value
     
     with warnings.catch_warnings(action="ignore"):
