@@ -138,6 +138,7 @@ def calculate_LStar_profile(
         fit_y = pitch_angles[mask][I]
         #fixed_pitch_angle = np.interp(np.log10(fixed_K), fit_x, fit_y)        
         fit = CubicSpline(fit_x, fit_y)
+        #fit = make_smoothing_spline(fit_x, fit_y)
         fixed_pitch_angle = float(fit(np.log10(fixed_K)))
     else:
         raise UnableToCalculatePSD()
@@ -160,9 +161,7 @@ def calculate_LStar_profile(
             flux_step2[i] = np.interp(
                 fixed_pitch_angle,
                 fit_x, fit_y
-            )            
-            #fit = CubicSpline(fit_x, fit_y)
-            #flux_step2[i] = fit(fixed_pitch_angle)
+            )
         else:
             flux_step2[i] = np.nan
 
@@ -172,8 +171,7 @@ def calculate_LStar_profile(
     #
     # Solve the quadratic equation, taking real root. See Green 2004 (Journal of
     # Geophysical Research), Step 3.
-    # ------------------------------------------------------------------------
-    
+    # ------------------------------------------------------------------------    
     fixed_mu_units = fixed_mu * units.MeV / units.G
     fixed_pitch_angle_rad = np.deg2rad(fixed_pitch_angle)
 
