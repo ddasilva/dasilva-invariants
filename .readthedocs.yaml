@@ -18,6 +18,7 @@ build:
     - build-essential
     - cmake
     - gfortran
+    - graphviz
   tools:
     python: "mambaforge-22.9"
 
