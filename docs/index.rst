@@ -62,7 +62,10 @@ This code calculates the second adiabatic invariant K for a particle bouncing th
 
     from dasilva_invariants import models, invariants
 
-    model = models.get_model("SWMF_CDF", "3d__var_1_e20151221-001700-014.out.cdf")
+    model = models.get_model(
+        "SWMF_CDF",
+         "3d__var_1_e20151221-001700-014.out.cdf"
+    )
 
     result = invariants.calculate_K(
         model,
