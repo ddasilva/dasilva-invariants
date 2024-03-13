@@ -18,6 +18,7 @@ build:
     - build-essential
     - cmake
     - gfortran
+    - python-dev
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
@@ -36,4 +37,3 @@ python:
     - requirements: docs/requirements.txt
     - method: pip
       path: .
-      verbose: true
