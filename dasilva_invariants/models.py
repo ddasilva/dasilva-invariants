@@ -82,16 +82,7 @@ class MagneticFieldModel:
         cover.
     """
 
-    def __init__(
-        self,
-        x: NDArray[np.float64],
-        y: NDArray[np.float64],
-        z: NDArray[np.float64],
-        Bx: NDArray[np.float64],
-        By: NDArray[np.float64],
-        Bz: NDArray[np.float64],
-        inner_boundary: float,
-    ):
+    def __init__(self, x, y, z, Bx, By, Bz, inner_boundary):
         self.x = x
         self.y = y
         self.z = z
@@ -113,7 +104,7 @@ class MagneticFieldModel:
         self._mesh.point_data["Phi_grid"] = phi_grid.flatten(order="F")
 
     def trace_field_line(
-        self, starting_point: Tuple[float, float, float], step_size: float
+        self, starting_point, step_size
     ) -> FieldLineTrace:
         """Perform a field line trace. Implements RK45 in both directions,
         stopping when outside the grid.
@@ -122,9 +113,10 @@ class MagneticFieldModel:
         ----------
         starting_point : tuple of floats
             Starting point of the field line trace, as (x, y, z) tuple of
-            floats, in units of Re. Trace will go in both directions.
+            floats, in units of Re. Trace will go in both directions until it hits
+            the model inner or outer boundary.
         step_size : float, optional
-            Step size to use with the field line trace
+            Step size to use with the field line trace. If not sure, try 1e-3.
 
         Returns
         -------
@@ -145,19 +137,19 @@ class MagneticFieldModel:
 
         return FieldLineTrace(points=pv_trace.points, B=pv_trace["B"])
 
-    def interpolate(
-        self, point: Tuple[float, float, float]
-    ) -> Tuple[float, float, float]:
-        """Linearly interpolate mesh to find magnetic field at given point.
+    def interpolate(self, point, radius=0.1):
+        """Interpolate mesh to find magnetic field at given point.
+
+        Uses a distance-weighted average of neighboring points.
 
         Parameters
         ----------
-        point: tuple of floats
+        point: tuple
            Position tuple of (x, y, z)
 
         Returns
         -------
-        B : tuple of floats
+        B : tuple
             Interpolated value of the mesh at given point.
         """
         points_search = pv.PolyData(np.array([point]))
@@ -165,7 +157,7 @@ class MagneticFieldModel:
         interp = vtk.vtkPointInterpolator()  # linear interpolation
         interp.SetInputData(points_search)
         interp.SetSourceData(self._mesh)
-        interp.GetKernel().SetRadius(0.1)        
+        interp.GetKernel().SetRadius(radius)        
         interp.Update()
 
         interp_result = pv.PolyData(interp.GetOutput())
@@ -200,7 +192,7 @@ def _fix_lfm_hdf4_array_order(data):
     return data
 
 
-def get_dipole_model_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
+def get_dipole_model_on_lfm_grid(lfm_hdf4_path) -> MagneticFieldModel:
     """Get a dipole field on a LFM grid. Uses an LFM HDF4 file to obtain
     the grid.
 
@@ -235,9 +227,7 @@ def get_dipole_model_on_lfm_grid(lfm_hdf4_path: str) -> MagneticFieldModel:
     )
 
 
-def _get_fixed_lfm_grid_centers(
-    lfm_hdf4_path: str,
-) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+def _get_fixed_lfm_grid_centers(lfm_hdf4_path: str):
     """Loads LFM grid centers with singularity patched.
 
     This code is adapted from Josh Murphy's GhostPy and converted to python
@@ -299,7 +289,7 @@ def _get_fixed_lfm_grid_centers(
     return X_grid_re, Y_grid_re, Z_grid_re
 
         
-def get_lfm_hdf4_model(lfm_hdf4_path: str) -> MagneticFieldModel:
+def get_lfm_hdf4_model(lfm_hdf4_path) -> MagneticFieldModel:
     """Get a magnetic field data + grid from LFM output. Uses an LFM HDF4 file.
 
     Parameters
@@ -341,11 +331,7 @@ def get_lfm_hdf4_model(lfm_hdf4_path: str) -> MagneticFieldModel:
     )
 
 
-def _apply_murphy_lfm_grid_patch(
-    Bx_raw: NDArray[np.float64],
-    By_raw: NDArray[np.float64],
-    Bz_raw: NDArray[np.float64],
-) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+def _apply_murphy_lfm_grid_patch(Bx_raw, By_raw, Bz_raw):
     """Apply Josh Murphy's patch to the LFM grid.
 
     This code is Josh Murphy's point2CellCenteredVector() function converted
@@ -390,7 +376,7 @@ def _apply_murphy_lfm_grid_patch(
     return Bx, By, Bz
 
 
-def _calc_cell_centers(A: NDArray[np.float64]) -> NDArray[np.float64]:
+def _calc_cell_centers(A):
     """Calculates centers of cells on a 3D grid.
 
     Parameters
@@ -760,6 +746,24 @@ def get_swmf_cdf_model(
 
 
 def get_generic_hdf5_model(path):
+    """Load a :py:class:`~MagneticFieldModel` from a generic HDF5 file.
+    
+    This is meant to plug in your own data.
+    
+    The file should have (m, n, p) arrays named "x", "y", "z",
+    "Bx", "By", "Bz", and a scalar key named "inner_boundary".
+
+    
+    Parameters
+    ----------
+    path : str
+       Path to file on disk
+
+    Returns
+    --------
+    model : :py:class:`~MagneticFieldModel`
+       Grid and Magnetic field values on that grid.
+    """
     hdf = h5py.File(path)
     x = hdf['x'][:]
     y = hdf['y'][:]
@@ -781,6 +785,8 @@ def get_model(model_type, path, **kwargs):
     For specific keyword arguments see other functions in this model
     that this common functions calls.
 
+    Parameters
+    ----------
     model_type : {"lfm_hdf4", "swmf_cdf", "generic_hdf5"}
        Type of the model (case insensitive)
     path : str
