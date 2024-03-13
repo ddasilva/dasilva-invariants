@@ -5,6 +5,8 @@ This package provides tools for radiation belt physicists to calculate the adiab
 
 This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, as well as the `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ and `SWMF <https://clasp.engin.umich.edu/research/theory-computational-methods/space-weather-modeling-framework/>`_ MHD simulation code.
 
+**Table of Contents**
+
 .. toctree::
   :maxdepth: 2
 
