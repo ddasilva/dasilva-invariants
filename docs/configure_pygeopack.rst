@@ -1,5 +1,0 @@
-Configuring PyGeopack
-=====================
-
-Under construction
-

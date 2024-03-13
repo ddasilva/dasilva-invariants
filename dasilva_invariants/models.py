@@ -9,7 +9,7 @@ fields are in units of Gauss.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import cast, Dict, List, Optional, Tuple, Union
+from typing import cast, Dict, List, Tuple, Union
 
 from ai import cs
 from astropy import constants, units
@@ -17,12 +17,10 @@ import cdflib
 import h5py
 from matplotlib.dates import date2num
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 import pandas as pd
 from pyhdf.SD import SD, SDC
 import pyvista as pv
-from scipy.interpolate import LinearNDInterpolator
-from scipy.spatial import KDTree
 import vtk
 
 from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
@@ -35,9 +33,12 @@ __all__ = [
     "FieldLineTrace",
     "get_dipole_model_on_lfm_grid",
     "get_lfm_hdf4_model",
-    "get_model",
-    "get_tsyganenko_on_lfm_grid_with_auto_params",
+    "get_tsyganenko",
+    "get_tsyganenko_on_lfm_grid",
     "get_tsyganenko_params",
+    "get_swmf_cdf_model",
+    "get_generic_hdf5_model",
+    "get_model",
 ]
 
 
@@ -588,7 +589,7 @@ def get_tsyganenko_params(
         Path to zip file (may be URL if network enabled). It is fastest
         to download this file and save it to disk, but this URL may be passed
         automatically to download every time
-        http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip
+        http://mag.gmu.edu/ftp/QinDenton/5min/merged/latest/WGparameters5min-latest.d.zip
 
     Returns
     -------
@@ -655,7 +656,8 @@ def get_tsyganenko_params(
     mask = (df["Year"] > (min_year - 1)) & (df["Year"] < (max_year + 1))
     df = df[mask].copy()
     df["DateTime"] = [
-        datetime(int(row.Year), 1, 1) + timedelta(days=row.Day - 1, hours=row.Hr, minutes=row.Min)
+        datetime(int(row.Year), 1, 1)
+        + timedelta(days=row.Day - 1, hours=row.Hr, minutes=row.Min)
         for _, row in df.iterrows()
     ]
 
@@ -671,7 +673,7 @@ def get_tsyganenko_params(
         else:
             params_dict[col] = np.interp(
                 date2num(times_list), date2num(df.DateTime), df[col]
-            )        
+            )
 
     return params_dict
 
@@ -774,7 +776,7 @@ def get_generic_hdf5_model(path):
 
 
 def get_model(model_type, path, **kwargs):
-    """Get a magnetic field model;
+    """Get a magnetic field mmodel_type, pathodel;
 
     For specific keyword arguments see other functions in this model
     that this common functions calls.

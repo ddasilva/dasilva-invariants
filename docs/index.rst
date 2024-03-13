@@ -1,62 +1,72 @@
 da Silva Invariants
 ===================
    
-.. note:: This package is under development and is not yet publically available. This website is a preview and changes may exist between this and the final version.
+This package provides tools for radiation belt physicists to calculate the adiabiatic invariant K and L* from from gridded models of Earth's magnetic field. For more information on the technique, see `Methodology <methodology.html>`_.
 
-This package provides tools for radiation belt physicists to peform adiabiatic invariant analysis from gridded magnetic field models of the Earth's magnetosphere. These parameters characterize three periodic motions associated with particles trapped in magnetospheres, and are used to study the dynamical system. For more information on the technique, see `Introduction to Method <intro.html>`_.
+This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, as well as the `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ and `SWMF <https://clasp.engin.umich.edu/research/theory-computational-methods/space-weather-modeling-framework/>`_ MHD simulation code.
 
-This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, as well as the `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ MHD simulation code. Support for additional models is planned in the future.
-
-Installing the package
+Installing the Dependencies
 ----------------------
-To install this package, you can use
+To use this module, install the conda environment file (or copy it into your own), and use pip to install the module. The ability to compile fortran files is required.
 
 .. code::
 
-   conda install -c conda-forge dasilva-invariants
+   $ conda env create -f environment.yml
+   $ conda activate dasilva-invariants
+   $ pip install .
+
+At a Glance
+-----------
 
 Calculating L* from TS05
-------------------------
-Below is code which calculates L* using the magnetic fields obtain from TS05 and placed on the LFM grid, for a particle observated with a pitch angle of 60° observed at (-6.6, 0, 0) R :sub:`E` (SM coordinate system). The LFM grid is specified by an LFM HDF4 file. This code is assumed to be run after the `PyGeopack environment is configured <configure_pygeopack.html>`_.
++++++++++++++++++++++++
+Below is code which calculates L* using the magnetic fields obtain from TS05 and placed on a regular grid, for a particle observated with a pitch angle of 60° observed at (-6.6, 0, 0) R :sub:`E` (SM coordinate system).
 
 .. code-block:: python
 
-    from dasilva_invariants import meshes, invariants
+    from dasilva_invariants import models, invariants
     from datetime import datetime
+    import numpy as np
 
-    ts05_mesh = meshes.get_tsyganenko_on_lfm_grid_with_auto_params(
-        "TS05",
-        time=datetime(2015, 10, 2),
-        lfm_hdf4_path="LFM_mhd_2013-10-02T00-00-00Z.hdf",
-        param_path="http://virbo.org/ftp/QinDenton/hour/merged/latest/WGhour-latest.d.zip",
-        tell_params=True,
+    # Get tsyganenko model input parameters
+    time = datetime(2015, 10, 2)
+    url = "http://mag.gmu.edu/ftp/QinDenton/5min/merged/latest/WGparameters5min-latest.d.zip",
+    params = models.get_tsyganenko_params(time, url)
+    
+    # Evaluate TS05 model on regular grid 
+    axis = np.arange(-10, 10, 0.15)
+    x, y, z = np.meshgrid(axis, axis, axis)
+    model = models.get_tsyganenko(
+        "TS05", params, time,
+        x_re_sm_grid=x,
+        y_re_sm_grid=y,
+        z_re_sm_grid=z,
+        inner_boundary=1
     )
 
-    try:
-        result = invariants.calculate_LStar(
-            ts05_mesh,
-            starting_point=(-6.6, 0, 0),
-            starting_pitch_angle=60
-        )
-    except invariants.DriftShellSearchDoesntConverge as e:
-        print("Unable to calculate drift shell; may not exist.")
-	raise SystemExit(1)
+    # Calculate L* 
+    result = invariants.calculate_LStar(
+        model,
+        starting_point=(-6.6, 0, 0),
+        starting_pitch_angle=60
+    )
 
     print(f"L* = {result.LStar}")
 
 
-Calculating K from LFM
-----------------------
-This code calculates the second adiabatic invariant K for a particle bouncing through (-6.6, 0, 0) R :sub:`E` (SM coordinate system) and mirroring at at 50° magnetic latitude, using magnetic fields from the LFM simulation code. 
+
+Calculating K from SWMF 
++++++++++++++++++++++++
+This code calculates the second adiabatic invariant K for a particle bouncing through (-6.6, 0, 0) R :sub:`E` (SM coordinate system) and mirroring at at 50° magnetic latitude, using magnetic fields from SWMF simulation output in CDF format (as obtained from the CCMC).
 
 .. code-block:: python
 
-    from dasilva_invariants import meshes, invariants
+    from dasilva_invariants import models, invariants
 
-    lfm_mesh = meshes.get_lfm_hdf4_data("LFM_mhd_2013-10-02T00-00-00Z.hdf")
+    model = models.get_model("SWMF_CDF", "3d__var_1_e20151221-001700-014.out.cdf")
 
     result = invariants.calculate_K(
-        lfm_mesh,
+        model,
         starting_point=(-6.6, 0, 0),
         mirror_latitude=50
     )
