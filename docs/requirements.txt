@@ -1,0 +1,5 @@
+sphinx
+sphinx_automodapi
+numpydoc
+pydata_sphinx_theme
+furo
