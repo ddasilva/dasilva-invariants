@@ -7,13 +7,12 @@ This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-m
 
 Installing the Dependencies
 ----------------------
-To use this module, install the conda environment file (or copy it into your own), and use pip to install the module. The ability to compile fortran files is required.
+To use this module, install the conda environment file (or copy it into your own), which will also install the module. The ability to compile fortran files is required.
 
 .. code::
 
    $ conda env create -f environment.yml
    $ conda activate dasilva-invariants
-   $ pip install .
 
 At a Glance
 -----------
