@@ -27,7 +27,7 @@ Below is code which calculates L* using the magnetic fields obtain from TS05 and
     from datetime import datetime
     import numpy as np
 
-    # Get tsyganenko model input parameters
+    # Get TS05 model input parameters
     time = datetime(2015, 10, 2)
     url = "http://mag.gmu.edu/ftp/QinDenton/5min/merged/latest/WGparameters5min-latest.d.zip",
     params = models.get_tsyganenko_params(time, url)
