@@ -33,9 +33,10 @@ rawfiles = ['_static/logo.png']
 # ones.
 extensions = [
     'sphinx_automodapi.automodapi',
+    "sphinx.ext.intersphinx",
     'sphinx.ext.autodoc',
     'sphinx.ext.todo',
-    'sphinx.ext.viewcode',
+    #'sphinx.ext.viewcode',
     'sphinx.ext.coverage',
     'sphinx.ext.githubpages',
     'numpydoc',
@@ -119,7 +120,6 @@ html_sidebars = {
         'logo.html',
         'github.html',
         'mynav.html',
-        'navigation.html',
         'searchbox.html',
     ]
 }
