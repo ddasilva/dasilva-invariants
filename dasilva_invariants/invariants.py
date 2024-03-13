@@ -1,10 +1,4 @@
-"""Numerical calculation of adiabatic invariants.
-
-The public interface functions are as follows, each of which return dataclasses
-defined specifically for the function. These functions raise a documented set of
-exceptions, which should be caught to detect problems which may occur during
-processing.
-"""
+"""Numerical calculation of adiabatic invariants."""
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
 
@@ -101,8 +95,8 @@ class CalculateLStarResult:
     drift_K : NDArray[np.float64]
         Array of second adiabatic invariant (K) at each local time, to be
         paired with `drift_local_times`
-    drift_K_results : List[:py:class:`~CalculateKResult`]
-        Array of :py:class:`~CalculateKResult` instances at each local time,
+    drift_K_results : dictionary of float to :py:class:`~CalculateKResult`
+        Dict mapping local time to  :py:class:`~CalculateKResult`,
         to be paired with `drift_local_times`. Through this object one can
         obtain a bounce motion path at each local time.
     drift_is_closed : bool
@@ -162,12 +156,9 @@ class DriftShellBisectionDoesntConverge(DriftShellSearchDoesntConverge):
 
 def calculate_K(
     model: MagneticFieldModel,
-    starting_point: Tuple[float, float, float],
-    mirror_latitude: Optional[float] = None,
-    Bm: Optional[float] = None,
-    pitch_angle: Optional[float] = None,
-    step_size: Optional[float] = None,
-    reuse_trace: Optional[FieldLineTrace] = None,
+    starting_point, mirror_latitude=None,
+    Bm=None, pitch_angle=None,
+    step_size=None, reuse_trace=None,
 ) -> CalculateKResult:
     """Calculate the third adiabatic invariant, K.
 
@@ -309,25 +300,25 @@ def calculate_K(
 
 def calculate_LStar(
     model: MagneticFieldModel,
-    starting_point: Tuple[float, float, float],
-    mode: str = "normal",
-    starting_mirror_latitude: Optional[float] = None,
-    Bm: Optional[float] = None,
-    starting_pitch_angle: Optional[float] = None,
-    integrand_atol: float = 0.01,
-    integrand_rtol: float = 0.01,
-    num_local_times = 16,
-    first_mlt_step: float = 2 * np.pi / 16,
-    max_mlt_step: float = 2 * np.pi / 4,
-    major_step: float = 0.05,
-    minor_step: float = 0.01,
-    interval_size_threshold: float = 0.05,
-    rel_error_threshold: float = 0.01,
-    max_iters: int = 300,
-    trace_step_size: Optional[float] = None,
-    interp_local_times: bool = True,
-    interp_npoints: int = 1024,
-    verbose: bool = False,
+    starting_point,
+    mode="normal",
+    starting_mirror_latitude=None,
+    Bm=None,
+    starting_pitch_angle=None,
+    integrand_atol=0.01,
+    integrand_rtol=0.01,
+    num_local_times=16,
+    first_mlt_step=2 * np.pi / 16,
+    max_mlt_step=2 * np.pi / 4,
+    major_step=0.05,
+    minor_step=0.01,
+    interval_size_threshold=0.05,
+    rel_error_threshold=0.01,
+    max_iters=300,
+    trace_step_size=None,
+    interp_local_times=True,
+    interp_npoints=1024,
+    verbose=False,
 ) -> CalculateLStarResult:
     """Calculate the third adiabatic invariant, L*
 

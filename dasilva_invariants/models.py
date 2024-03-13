@@ -1,6 +1,5 @@
-"""Tools for obtaining models for use in calculating invariants.
-
-Models are grids + magnetic field vectors at those grid points. They
+"""Tools for obtaining models for use in calculating invariants. Models
+are grids + magnetic field vectors at those grid points. They
 are instances of :py:class:`~MagneticFieldModel`.
 
 In this module, all grids returned are in units of Re and all magnetic
