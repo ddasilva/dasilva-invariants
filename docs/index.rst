@@ -5,6 +5,12 @@ This package provides tools for radiation belt physicists to calculate the adiab
 
 This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, as well as the `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ and `SWMF <https://clasp.engin.umich.edu/research/theory-computational-methods/space-weather-modeling-framework/>`_ MHD simulation code.
 
+.. toctree::
+  :maxdepth: 2
+
+  methodology.rst             
+  dasilva_invariants.rst
+
 Installing the Dependencies
 ----------------------
 To use this module, install the conda environment file (or copy it into your own), which will also install the module. The ability to compile fortran files is required.
@@ -64,7 +70,7 @@ This code calculates the second adiabatic invariant K for a particle bouncing th
 
     model = models.get_model(
         "SWMF_CDF",
-         "3d__var_1_e20151221-001700-014.out.cdf"
+        "3d__var_1_e20151221-001700-014.out.cdf"
     )
 
     result = invariants.calculate_K(
@@ -75,11 +81,4 @@ This code calculates the second adiabatic invariant K for a particle bouncing th
 
     print(f"K = {result.K}")
 
-
-User Documentation
-------------------
-.. toctree::
-  :maxdepth: 1
-             
-  dasilva_invariants.rst
 
