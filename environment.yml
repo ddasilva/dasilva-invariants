@@ -21,4 +21,14 @@ dependencies:
     - PyGeopack>=1.2.4
     - pyhdf
     - types-python-dateutil
+    
+    # Install local module
     - .
+
+    # Install docs dependencies
+    - sphinx
+    - sphinx_automodapi
+    - numpydoc
+    - pydata_sphinx_theme
+    - furo
+
