@@ -120,6 +120,7 @@ html_sidebars = {
         'logo.html',
         'github.html',
         'navigation.html',
+        "relations.html",
         'searchbox.html',
     ]
 }
