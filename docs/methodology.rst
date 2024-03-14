@@ -1,7 +1,9 @@
 Methodology and References
 ==========================
 
-This technique is a tool for studying radiation belt physics, and is really only useful in that context. The most formal way to learn the methodology of this library is to read `da Silva et al., 2024: Numerical Calculations of Adiabatic Invariants from MHD-Driven Magnetic Fields <https://scholar.google.com/scholar?hl=en&as_sdt=0%2C21&q=Numerical+Calculations+of+Adiabatic+Invariants+from+MHD-Driven+Magnetic+Fields&btnG=>`_. 
+This technique is a tool for studying radiation belt physics, and is really only useful in that context. The most formal way to learn the methodology of this library is to read the publication, `da Silva et al., 2024: Numerical Calculations of Adiabatic Invariants from MHD-Driven Magnetic Fields <https://scholar.google.com/scholar?hl=en&as_sdt=0%2C21&q=Numerical+Calculations+of+Adiabatic+Invariants+from+MHD-Driven+Magnetic+Fields&btnG=>`_. 
+
+This package uses the "Roederer Method" for calculating L*, and integration over the bounce path to calculate K. 
 
 **References**
     * `Roederer, Juan G., and Hui Zhang. Dynamics of magnetically trapped particles. Springer-Verlag Berlin An, 2016.  <https://link.springer.com/book/10.1007/978-3-642-41530-2>`_
