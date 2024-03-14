@@ -353,9 +353,9 @@ def calculate_LStar(
         shell radius
     num_local_times : 'adaptive' or int
         Number of local times to use. If 'adaptive' is passed, uses a Runge-Kutta
-         method.
+        method.
     minor_step : float, optional
-         Size of small step (float, units of Re) to refine drift shell radius
+        Size of small step (float, units of Re) to refine drift shell radius
     interval_size_threshold : float, optional
         Only used by mode='bisection'. Bisection threshold before linearly
         interpolating
@@ -369,8 +369,6 @@ def calculate_LStar(
     interp_npoints : int, optional
         Number of points to usein interplation, only active if
         interp_local_times=True
-    verbose : bool, optional
-        Set to true to enable logging messages to console (stdout)
 
     Returns
     -------
