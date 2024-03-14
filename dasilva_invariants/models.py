@@ -420,7 +420,7 @@ def get_tsyganenko(
         inner_boundary: float,
         external_field_only: bool = False,
 ) -> MagneticFieldModel:
-    """Internal helper function to get one of the tsyganenko fields on an LFM grid.
+    """Helper function to get one of the tsyganenko fields on an LFM grid.
 
     Parameters
     -----------
@@ -518,7 +518,7 @@ def get_tsyganenko_on_lfm_grid(
     lfm_hdf4_path: str,
     external_field_only: bool = False,
 ) -> MagneticFieldModel:
-    """Internal helper function to get one of the tsyganenko fields on an LFM grid.
+    """Helper function to get one of the tsyganenko fields on an LFM grid.
 
     Parameters
     -----------
@@ -664,13 +664,14 @@ def get_tsyganenko_params(
 
 
 def get_swmf_cdf_model(
-    path: str,
-    xaxis: NDArray[np.float64] =np.arange(-10, 10, .15),
-    yaxis: NDArray[np.float64] = np.arange(-10, 10, .15),
-    zaxis: NDArray[np.float64] = np.arange(-5, 5, .15)
+    path,
+    xaxis=np.arange(-10, 10, .15),
+    yaxis=np.arange(-10, 10, .15),
+    zaxis=np.arange(-5, 5, .15)
 ):
-    """Get a magnetic field data + grid from SWMF CDF output. This regrids it
-    to a rectilinear grid.
+    """Get a :py:class:`~MagneticFieldModel` from SWMF CDF output.
+    This regrids it to a rectilinear grid each time this function
+    is called.
 
     Parameters
     -----------
@@ -681,7 +682,7 @@ def get_swmf_cdf_model(
     yaxis: array
         y-axis of rectilinear grid (default -10:.15:10)
     zaxis: array
-        z-axis of rectilinear grid  (default -5:.15:5)
+        z-axis of rectilinear grid (default -5:.15:5)
 
     Returns
     --------
