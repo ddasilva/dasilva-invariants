@@ -1,7 +1,7 @@
 Citing
 --------
 
-If you use this code and publish, citation is appreciate. To cite this library, please cite the following presentation until the paper is published:
+If you use this code and publish, citation is appreciated. To cite this library, please cite the following presentation until the paper is published:
 
 BibTex
 +++++++++
