@@ -11,8 +11,8 @@ da Silva Invariants
   methodology.rst             
   dasilva_invariants.rst
 
-Installing the Dependencies
-----------------------
+Installing
+----------
 To use this module, install the conda environment file (or copy it into your own), which will also install the module. The ability to compile fortran files is required.
 
 .. code::
