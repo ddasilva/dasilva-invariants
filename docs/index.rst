@@ -12,7 +12,7 @@ da Silva Invariants
   dasilva_invariants.rst
 
 Installing
-----------
+-------------
 To use this module, install the conda environment file (or copy it into your own), which will also install the module. The ability to compile fortran files is required.
 
 .. code::
@@ -20,8 +20,8 @@ To use this module, install the conda environment file (or copy it into your own
    $ conda env create -f environment.yml
    $ conda activate dasilva-invariants
 
-At a Glance
------------
+Brief Tour
+-------------
 
 Calculating L* from TS05
 +++++++++++++++++++++++
