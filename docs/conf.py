@@ -119,7 +119,6 @@ html_sidebars = {
     '**': [
         'logo.html',
         'github.html',
-        'mynav.html',
         'navigation.html',
         'searchbox.html',
     ]
