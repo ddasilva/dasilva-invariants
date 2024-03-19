@@ -441,38 +441,42 @@ def calculate_LStar(
         [result.trace_latitude.max() for result in drift_K_results], dtype=float
     )
 
-    if interp_local_times:
+    if ivp_result:
+        # Use of adaptive integration supercedes any interpolation 
+        integral_axis = ivp_result.t
+        integral_theta = None
+        integral_integrand = ivp_result.y
+        integral = ivp_result.y[0, -1]
+    elif interp_local_times:
         # Interpolate with cubic spline with periodic boundary condition
         # that forces the 1st and 2nd derivatives to be equal at the first
         # and last points
-        spline_x = drift_local_times
-        spline_y = trace_north_latitudes
-        spline_y[-1] = spline_y[
-            0
-        ]  # required by CubicSpline, may be off due to num noise
+        spline_x = np.zeros(len(drift_K_results) + 1)
+        spline_y = np.zeros(len(drift_K_results) + 1)
+
+        spline_x[:-1] = drift_local_times
+        spline_x[-1] = drift_local_times[0] + 2 * np.pi
+
+        spline_y[:-1] = trace_north_latitudes
+        spline_y[-1] = trace_north_latitudes[0]
+
         spline = interpolate.CubicSpline(spline_x, spline_y, bc_type="periodic")
 
         integral_axis = np.linspace(spline_x.min(), spline_x.max(), interp_npoints)
+
         # colatitude
         integral_theta = np.pi / 2 - spline(integral_axis).astype(float)
-
         integral_integrand = np.sin(integral_theta) ** 2.0
         integral = np.trapz(integral_integrand, integral_axis)
-
     else:
-        if ivp_result is None:
-            integral_axis = np.zeros(drift_local_times.size + 1)
-            integral_axis[:-1] = drift_local_times
-            integral_axis[-1] = integral_axis[0] + 2 * np.pi
-            
-            integral_theta = np.zeros(len(drift_K_results) + 1)
-            integral_theta[:-1] = np.pi / 2 - trace_north_latitudes  # colatitude
-            integral_theta[-1] = integral_theta[0]
-        else:        
-            integral_axis = ivp_result.t
-            integral_theta = None
-            integral_integrand = ivp_result.y
-            integral = ivp_result.y[0, -1]
+        # Not adaptive, not with interpolation 
+        integral_axis = np.zeros(drift_local_times.size + 1)
+        integral_axis[:-1] = drift_local_times
+        integral_axis[-1] = integral_axis[0] + 2 * np.pi
+        
+        integral_theta = np.zeros(len(drift_K_results) + 1)
+        integral_theta[:-1] = np.pi / 2 - trace_north_latitudes  # colatitude
+        integral_theta[-1] = integral_theta[0]
 
     LStar = 2 * np.pi * (inner_rvalue / surface_rvalue) / integral
 
@@ -989,7 +993,7 @@ def _do_basic_drift_shell_calc(
 
         last_rvalue, _ = drift_shell_results[drift_local_times[i - 1]]
 
-        if mode == "normal":
+        if mode == "normal":            
             if starting_pitch_angle == 90.0:
                 output = _linear_search_rvalue_by_Bmin(
                     model,

@@ -223,7 +223,7 @@ def get_dipole_model_on_lfm_grid(lfm_hdf4_path) -> MagneticFieldModel:
     # ------------------------------------------------------------------------
     return MagneticFieldModel(
         X_grid, Y_grid, Z_grid, Bx, By, Bz, inner_boundary=LFM_INNER_BOUNDARY
-    )
+    )    
 
 
 def _get_fixed_lfm_grid_centers(lfm_hdf4_path: str):
@@ -559,10 +559,10 @@ def get_tsyganenko_on_lfm_grid(
 
 
 def get_tsyganenko_params(
-    times: Union[Sequence, datetime],
-    path: str,
-    skip_cache: bool = False,
-    __T_AUTO_DL_CACHE: Dict[str, pd.DataFrame] = {},
+    times,
+    path='http://mag.gmu.edu/ftp/QinDenton/5min/merged/latest/WGparameters5min-latest.d.zip',
+    skip_cache=False,
+    __T_AUTO_DL_CACHE={},
 ) -> Dict[str, NDArray[np.float64]]:
     """Get parameters for tsyganenko models.
 
@@ -572,20 +572,19 @@ def get_tsyganenko_params(
         Time(s) to get paramters for.
     path : str
         Path to zip file (may be URL if network enabled). It is fastest
-        to download this file and save it to disk, but this URL may be passed
-        automatically to download every time
-        http://mag.gmu.edu/ftp/QinDenton/5min/merged/latest/WGparameters5min-latest.d.zip
+        to download this file and save it to disk, but the default option be used to
+        to automatically download every time.
 
     Returns
     -------
     params : dict, str to array
         dictionary mapping variable to array of parameters
     """
-    times_list: List[datetime] = []
+    times_list = []
 
     try:
-        iter(times)  # type: ignore
-        times_list = times  # type: ignore
+        iter(times)
+        times_list = times
     except TypeError:
         assert isinstance(times, datetime)
         times_list = [times]
