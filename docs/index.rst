@@ -3,9 +3,9 @@ da Silva Invariants
    
 .. note:: 
     
-    This package provides tools for radiation belt physicists to calculate the adiabiatic invariants K and L* from from gridded models of Earth's magnetic field. This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, `SWMF <https://clasp.engin.umich.edu/research/theory-computational-methods/space-weather-modeling-framework/>`_ and `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ MHD simulation output, and data on an arbitrary structured grid. 
+    This package provides tools for radiation belt physicists to calculate the adiabiatic invariants K and L* from gridded models of Earth's magnetic field. This package supports the `T96 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/t96/>`_ and `TS05 <https://geo.phys.spbu.ru/~tsyganenko/empirical-models/magnetic_field/ts05/>`_ empirical Tsyganenko magnetic field models, `SWMF <https://clasp.engin.umich.edu/research/theory-computational-methods/space-weather-modeling-framework/>`_ and `LFM <https://doi.org/10.1016/j.jastp.2004.03.020>`_ MHD simulation output, and data on an arbitrary structured grid. 
 
-    `[Paper] <https://scholar.google.com/scholar?hl=en&as_sdt=0%2C21&q=Numerical+Calculations+of+Adiabatic+Invariants+from+MHD-Driven+Magnetic+Fields&btnG=>`_ `[Poster] <_static/poster.pdf>`_
+    `[Paper (coming soon)] <https://scholar.google.com/scholar?hl=en&as_sdt=0%2C21&q=Numerical+Calculations+of+Adiabatic+Invariants+from+MHD-Driven+Magnetic+Fields&btnG=>`_ `[Poster] <_static/poster.pdf>`_
 
 **Table of Contents**
 
