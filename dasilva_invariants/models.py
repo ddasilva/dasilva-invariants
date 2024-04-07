@@ -662,12 +662,7 @@ def get_tsyganenko_params(
     return params_dict
 
 
-def get_swmf_cdf_model(
-    path,
-    xaxis=np.arange(-10, 10, .15),
-    yaxis=np.arange(-10, 10, .15),
-    zaxis=np.arange(-5, 5, .15)
-):
+def get_swmf_cdf_model(path, xaxis=None, yaxis=None, zaxis=None):
     """Get a :py:class:`~MagneticFieldModel` from SWMF CDF output.
     This regrids it to a rectilinear grid each time this function
     is called.
@@ -688,7 +683,14 @@ def get_swmf_cdf_model(
     model : :py:class:`~MagneticFieldModel`
         Data on rectilinear grid with SWMF magnetic field values. Grid is in units 
         of Re and magnetic field is is units of Gauss
-    """    
+    """
+    if xaxis is None:
+        xaxis = np.arange(-10, 10, .15)
+    if yaxis is None:
+        yaxis = np.arange(-10, 10, .15)
+    if zaxis is None:
+        zaxis = np.arange(-5, 5, .15)
+    
     # Load data from CDF
     cdf = cdflib.CDF(path)
     
