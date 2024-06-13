@@ -66,6 +66,7 @@ def calculate_LStar_profile(
     insitu_observation: InSituObservation,
     model: MagneticFieldModel,
     particle: str = "electron",
+    cache_dir=None,
     calculate_lstar_kwargs: Dict[Any, Any] = {},
 ) -> CalculateLStarProfileResult:
     """Calculation of f(L*) vs L* profiles at fixed mu and K.
@@ -141,10 +142,10 @@ def calculate_LStar_profile(
         #fit = make_smoothing_spline(fit_x, fit_y)
         fixed_pitch_angle = float(fit(np.log10(fixed_K)))
     else:
-        raise UnableToCalculatePSD()
+        raise UnableToCalculatePSD('Not enough points to interpolate K')
 
     if fixed_pitch_angle > 90 or fixed_pitch_angle < 0:
-        raise UnableToCalculatePSD()        
+        raise UnableToCalculatePSD('Fixed Pitch Angle outside of bounds')        
     
     # Compute and interpolate flux at fixed K, for each energy.
     # -----------------------------------------------------------------------
@@ -195,6 +196,21 @@ def calculate_LStar_profile(
     #fit = CubicSpline(fit_x[fit_mask], fit_y[fit_mask])
     fit = make_smoothing_spline(fit_x[fit_mask], fit_y[fit_mask])
     fixed_E_unitless = fixed_E.to(units.keV).value
+
+    # import pylab as plt
+    # plt.plot(10**fit_x, 10**fit(fit_x), 'r-', label='Power Law Fit')
+    # plt.plot(10**fit_x, 10**make_smoothing_spline(fit_x[fit_mask], fit_y[fit_mask])(fit_x), 'g-', label='Smoothing Spline Fit')
+    # plt.plot(10**fit_x, 10**fit_y, 'k.', label='Measurements')
+    # plt.axvline(fixed_E_unitless, color='k', label='Target E')
+    # plt.xscale('log')
+    # plt.yscale('log')
+    # plt.xlabel('E (keV)')
+    # plt.ylabel('Flux')
+    # plt.grid(color='#ccc', linestyle='dashed')
+    # plt.legend()
+    # plt.savefig('Power_Law.png', dpi=300)
+    # plt.close()
+    # raise RuntimeError()
     
     with warnings.catch_warnings(action="ignore"):
         try:
@@ -215,9 +231,9 @@ def calculate_LStar_profile(
     # Calculate L* paired with this measurement
     # ------------------------------------------------------------------------
     cache_key = insitu_observation.time.isoformat()
-    cache_fname = f'cache/{cache_key}.txt'
+    cache_fname = f'{cache_dir}/{cache_key}.txt'
     
-    if os.path.exists(cache_fname):
+    if cache_dir and os.path.exists(cache_fname):
         lstar_result = None
         LStar = float(open(cache_fname).read())
     else:
@@ -229,8 +245,10 @@ def calculate_LStar_profile(
             **calculate_lstar_kwargs,
         )
         LStar = lstar_result.LStar
-        with open(cache_fname, 'w') as fh:
-            fh.write(str(LStar))
+
+        if cache_dir:
+            with open(cache_fname, 'w') as fh:
+                fh.write(str(LStar))
         
     return CalculateLStarProfileResult(
         phase_space_density=phase_space_density,
