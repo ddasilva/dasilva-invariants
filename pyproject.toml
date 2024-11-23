@@ -39,8 +39,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "flake8",
-    "mypy",   
+    "mypy",    
     "pytest",
+    "requests",
 ]
 
 docs = [
