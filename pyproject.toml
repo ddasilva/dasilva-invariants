@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=45",
+            "setuptools_scm[toml]>=6.2",
+            "wheel"]
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = "dasilva-invariants"
+description = 'Calculation of Radiation Belt Adiabatic Invariants from TS05, T96, LFM, and SWMF magnetic field models'
+version = "0.1.0"
+authors = [{name = "Daniel da Silva", email = "mail@danieldasilva.org"}]
+license = {file = "LICENSE.rst"}
+requires-python = ">=3.9"
+classifiers=[
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: BSD License",
+]
+
+dependencies = [
+    "ai.cs>=1.0.7",
+    "astropy>=5.1",
+    "cdflib",
+    "h5py>=3.10.0",
+    "numpy>=1.24.4",
+    "pandas>=1.5.2",
+    "PyGeopack>=1.2.4",
+    "pyhdf",
+    "pyvista",
+    "scipy>=1.9.3",
+    "types-python-dateutil"
+]
+
+[project.optional-dependencies]
+dev = [
+    "flake8",
+    "mypy",   
+    "pytest",
+]
+
+docs = [
+    "sphinx",
+    "sphinx_automodapi",
+    "numpydoc",
+    "pydata_sphinx_theme",
+    "furo"
+]
+
+[project.urls]
+Homepage = "https://dasilva-invariants.readthedocs.io/en/latest/"
