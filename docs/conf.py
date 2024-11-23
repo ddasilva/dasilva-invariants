@@ -117,6 +117,7 @@ html_logo = "_static/logo.png"
 # refs: http://alabaster.readthedocs.io/en/latest/installation.html#sidebars
 html_sidebars = {
     '**': [
+        'redirect.html',  # redirects to new project
         'logo.html',
         'github.html',
         'navigation.html',
