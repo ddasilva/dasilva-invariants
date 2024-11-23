@@ -15,13 +15,13 @@ from typing import cast, Dict, List, Tuple, Union
 from ai import cs
 from astropy import constants, units
 from cdasws import CdasWs
-import cdflib
 import h5py
 from matplotlib.dates import date2num
 import numpy as np
 from numpy.typing import NDArray
 from pyhdf.SD import SD, SDC
 import pyvista as pv
+from spacepy import pycdf
 import vtk
 
 # Don't print warnings from pygeopack about data not found
@@ -659,14 +659,16 @@ def get_swmf_cdf_model(path, xaxis=None, yaxis=None, zaxis=None):
         zaxis = np.arange(-5, 5, .15)
     
     # Load data from CDF
-    cdf = cdflib.CDF(path)
+    cdf = pycdf.CDF(path)
     
-    x = cdf.varget('x').flatten()
-    y = cdf.varget('y').flatten()
-    z = cdf.varget('z').flatten()
-    bx = nanoTesla2Gauss(cdf.varget('bx').flatten())
-    by = nanoTesla2Gauss(cdf.varget('by').flatten())
-    bz = nanoTesla2Gauss(cdf.varget('bz').flatten())
+    x = cdf['x'][:].flatten()
+    y = cdf['y'][:].flatten()
+    z = cdf['z'][:].flatten()
+    bx = nanoTesla2Gauss(cdf['bx'][:].flatten())
+    by = nanoTesla2Gauss(cdf['by'][:].flatten())
+    bz = nanoTesla2Gauss(cdf['bz'][:].flatten())
+
+    cdf.close()
     
     # Calculate Dipole (data in file is external field)
     r = np.sqrt(x**2 + y**2 + z**2)
