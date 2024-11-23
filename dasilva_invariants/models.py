@@ -8,7 +8,9 @@ fields are in units of Gauss.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import os
 from typing import cast, Dict, List, Tuple, Union
+
 
 from ai import cs
 from astropy import constants, units
@@ -22,9 +24,12 @@ from pyhdf.SD import SD, SDC
 import pyvista as pv
 import vtk
 
+# Don't print warnings from pygeopack about data not found
+os.environ['GEOPACK_NOWARN'] = '1'
+import PyGeopack as gp
+
 from .constants import EARTH_DIPOLE_B0, LFM_INNER_BOUNDARY
 from .utils import nanoTesla2Gauss
-from ._fortran import geopack2008, t96, ts05  # type:ignore
 
 
 __all__ = [
@@ -97,10 +102,10 @@ class MagneticFieldModel:
         self._mesh = pv.StructuredGrid(x, y, z)
         self._mesh.point_data["B"] = B
 
-        R_grid, theta_grid, phi_grid = cs.cart2sp(x, y, z)
-        self._mesh.point_data["R_grid"] = R_grid.flatten(order="F")
-        self._mesh.point_data["Theta_grid"] = theta_grid.flatten(order="F")
-        self._mesh.point_data["Phi_grid"] = phi_grid.flatten(order="F")
+        #R_grid, theta_grid, phi_grid = cs.cart2sp(x, y, z)
+        #self._mesh.point_data["R_grid"] = R_grid.flatten(order="F")
+        #self._mesh.point_data["Theta_grid"] = theta_grid.flatten(order="F")
+        #self._mesh.point_data["Phi_grid"] = phi_grid.flatten(order="F")
 
     def trace_field_line(
         self, starting_point, step_size
@@ -438,8 +443,6 @@ def get_tsyganenko(
         z coordinates
     inner_boundary : float
         Inner boundary of model
-    external_field_only : bool
-        Set to True to not include the internal (dipole) model
 
     Returns
     -------
@@ -451,44 +454,51 @@ def get_tsyganenko(
     y_re_sm = y_re_sm_grid.flatten()
     z_re_sm = z_re_sm_grid.flatten()
 
-    # Call compiled Tsyganenko fortran code  to get extenral field
-    parmod = (
-        params["Pdyn"],
-        params["dst"],
-        params["By"],
-        params["Bz"]
-    ) + tuple([params[f"W{i+1}"] for i in range(6)])
+    # Call PyGeopack fortran code  to get magnetic field
+    params = params.copy()
 
-    time_tup = (
-        time.year,
-        int(time.strftime("%j")),
-        time.hour,
-        time.minute,
-        time.second,
-    )
+    for i in range(1, 7):
+        key = f"W{i}"
+        if key not in params:
+            params[key] = 0.0
 
-    geopack2008.recalc(time_tup, (-400, 0.0, 0.0))
-
+    if "dst" in params:
+        params["SymH"] = params["dst"]
+        del params["dst"]
+            
+    gp_date = int(time.strftime("%Y%m%d"))
+    gp_ut = int(time.strftime("%H")) + time.minute / 60
+    
     if model_name.lower() == "t96":
-        Bx, By, Bz = t96.t96numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+        gp_model = 'T96'
     elif model_name.lower() == "ts05":
-        Bx, By, Bz = ts05.ts05numpy(parmod, 0.0, x_re_sm, y_re_sm, z_re_sm)
+        gp_model = 'TS05'
     else:
         raise ValueError(f"Invalid parameter model_name={repr(model_name)}")
 
-    # Calculate dipole field for internal model,
-    if not external_field_only:
-        Bx_dip, By_dip, Bz_dip = geopack2008.dipnumpy(x_re_sm, y_re_sm, z_re_sm)
-        Bx += Bx_dip
-        By += By_dip
-        Bz += Bz_dip
-
-    # NaN out points under inner boundary
     r_re_sm = np.sqrt(x_re_sm**2 + y_re_sm**2 + z_re_sm**2)
-    Bx[r_re_sm < inner_boundary] = np.nan
-    By[r_re_sm < inner_boundary] = np.nan
-    Bz[r_re_sm < inner_boundary] = np.nan
+    mask = r_re_sm > inner_boundary
+
+    Bx = np.zeros_like(x_re_sm)
+    By = Bx.copy()
+    Bz = Bx.copy()
+    Bx[~mask] = np.nan
+    By[~mask] = np.nan
+    Bz[~mask] = np.nan
     
+    Bx[mask], By[mask], Bz[mask] = gp.ModelField(
+        x_re_sm[mask],
+        y_re_sm[mask],
+        z_re_sm[mask],
+        Date=gp_date,
+        ut=gp_ut,
+        Model=gp_model,
+        CoordIn='SM',
+        CoordOut='SM',
+        **params
+    )
+    print('Here end')
+        
     # Convert from nT to Gauss
     Bx = nanoTesla2Gauss(Bx)
     By = nanoTesla2Gauss(By)
@@ -539,7 +549,6 @@ def get_tsyganenko_on_lfm_grid(
         Magnetic model on LFM grid with dipole field values. Grid is in units of
         Re and magnetic field is is units of Gauss.
     """
-
     # Load LFM grid centers with singularity patched
     # ------------------------------------------------------------------------
     x_re_sm_grid, y_re_sm_grid, z_re_sm_grid = _get_fixed_lfm_grid_centers(

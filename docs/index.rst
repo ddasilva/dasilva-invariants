@@ -44,7 +44,7 @@ Below is code which calculates L* using the magnetic fields obtain from TS05 and
     params = models.get_tsyganenko_params(time, url)
     
     # Evaluate TS05 model on regular grid 
-    axis = np.arange(-10, 10, 0.15)
+    axis = np.arange(-10, 10, 0.50)
     x, y, z = np.meshgrid(axis, axis, axis)
     model = models.get_tsyganenko(
         "TS05", params, time,
