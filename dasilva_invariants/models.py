@@ -14,12 +14,12 @@ from typing import cast, Dict, List, Tuple, Union
 
 from ai import cs
 from astropy import constants, units
+from cdasws import CdasWs
 import cdflib
 import h5py
 from matplotlib.dates import date2num
 import numpy as np
 from numpy.typing import NDArray
-import pandas as pd
 from pyhdf.SD import SD, SDC
 import pyvista as pv
 import vtk
@@ -497,7 +497,6 @@ def get_tsyganenko(
         CoordOut='SM',
         **params
     )
-    print('Here end')
         
     # Convert from nT to Gauss
     Bx = nanoTesla2Gauss(Bx)
@@ -567,28 +566,23 @@ def get_tsyganenko_on_lfm_grid(
     )
 
 
-def get_tsyganenko_params(
-    times,
-    path='http://mag.gmu.edu/ftp/QinDenton/5min/merged/latest/WGparameters5min-latest.d.zip',
-    skip_cache=False,
-    __T_AUTO_DL_CACHE={},
-) -> Dict[str, NDArray[np.float64]]:
-    """Get parameters for tsyganenko models.
+def get_tsyganenko_params(times):
+    """Get parameters for tsyganenko models from CDAWeb API.
+
+    This functional downloads data over the network every call. To improve
+    performance, call this function once and save the results.
 
     Parameters
     -----------
     times : datetime or list of datetime (no timezones)
         Time(s) to get paramters for.
-    path : str
-        Path to zip file (may be URL if network enabled). It is fastest
-        to download this file and save it to disk, but the default option be used to
-        to automatically download every time.
 
     Returns
     -------
     params : dict, str to array
         dictionary mapping variable to array of parameters
     """
+    # Massage time argument into list if it is just a single datetime
     times_list = []
 
     try:
@@ -597,77 +591,41 @@ def get_tsyganenko_params(
     except TypeError:
         assert isinstance(times, datetime)
         times_list = [times]
+        
+    # Define column map between CDAS and our system. Keys: CDAS, Values: Us
+    col_map = {
+        "Pdyn": "Pressure",
+        "SymH": "SYM_H",
+        "By": "BY_GSM",
+        "Bz": "BZ_GSM",
+    }
+        
+    # Make a call to CDAWeb API (CDAS)
+    delta = timedelta(minutes=5)
+    time0 = min(times_list) - delta
+    time1 = max(times_list) + delta
+        
+    cdas = CdasWs()    
+    dataset = 'OMNI_HRO_1MIN'
+    var_names = cdas.get_variable_names(dataset)
+    status, data_result = cdas.get_data(dataset, var_names, time0=time0, time1=time1)
+    cdas_data = {v: np.array(data_result[v]) for v in var_names + ['Epoch']}
 
-    if path in __T_AUTO_DL_CACHE and not skip_cache:
-        df = __T_AUTO_DL_CACHE[path]
-    else:
-        # ignore typing here because pandas broken
-        df = pd.read_csv(
-            path,
-            index_col=False,
-            delim_whitespace=True,
-            skiprows=1,
-            names=[  # type:ignore
-                "Year",
-                "Day",
-                "Hr",
-                "Min",
-                "By",
-                "Bz",
-                "V_SW",
-                "Den_P",
-                "Pdyn",
-                "G1",
-                "G2",
-                "G3",
-                "8_status",
-                "kp",
-                "akp3",
-                "dst",
-                "Bz1",
-                "Bz2",
-                "Bz3",
-                "Bz4",
-                "Bz5",
-                "Bz6",
-                "W1",
-                "W2",
-                "W3",
-                "W4",
-                "W5",
-                "W6",
-                "6_stat",
-            ],
-        )
-
-        df = cast(pd.DataFrame, df)
-        __T_AUTO_DL_CACHE[path] = df
-
-    min_year = min(time.year for time in times_list)
-    max_year = max(time.year for time in times_list)
-
-    mask = (df["Year"] > (min_year - 1)) & (df["Year"] < (max_year + 1))
-    df = df[mask].copy()
-    df["DateTime"] = [
-        datetime(int(row.Year), 1, 1)
-        + timedelta(days=row.Day - 1, hours=row.Hr, minutes=row.Min)
-        for _, row in df.iterrows()
-    ]
-
-    # Interpolate Tsyganenko parameters (some may be unused)
-    cols = ["Pdyn", "dst", "By", "Bz", "W1", "W2", "W3", "W4", "W5", "W6"]
+    # Interpolate Tsyganenko parameters from CDAS data
     params_dict = {}
 
-    for col in cols:
+    for our_col, cdas_col in col_map.items():
+        mask = (cdas_data[cdas_col] < 99.0)     # skip fill values
+    
         if len(times_list) == 1:
-            (params_dict[col],) = np.interp(
-                date2num(times_list), date2num(df.DateTime), df[col]
+            (params_dict[our_col],) = np.interp(
+                date2num(times_list), date2num(cdas_data['Epoch'])[mask], cdas_data[cdas_col][mask]
             )
         else:
-            params_dict[col] = np.interp(
-                date2num(times_list), date2num(df.DateTime), df[col]
+            params_dict[our_col] = np.interp(
+                date2num(times_list), date2num(cdas_data['Epoch'])[mask], cdas_data[cdas_col][mask]
             )
-
+    
     return params_dict
 
 

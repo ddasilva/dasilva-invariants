@@ -18,12 +18,11 @@ da Silva Invariants
 
 Installing
 -------------
-To use this module, install the conda environment file (or copy it into your own), which will also install the module. The ability to compile fortran files is required.
+This module can be installed using pip and PyPI.
 
 .. code::
 
-   $ conda env create -f environment.yml
-   $ conda activate dasilva-invariants
+   $ pip install dasilva-invariants
 
 Brief Tour
 -------------
@@ -38,10 +37,9 @@ Below is code which calculates L* using the magnetic fields obtain from TS05 and
     from datetime import datetime
     import numpy as np
 
-    # Get TS05 model input parameters
+    # Get TS05 model input parameters from CDAWeb API
     time = datetime(2015, 10, 2)
-    url = "http://mag.gmu.edu/ftp/QinDenton/5min/merged/latest/WGparameters5min-latest.d.zip",
-    params = models.get_tsyganenko_params(time, url)
+    params = models.get_tsyganenko_params(time)
     
     # Evaluate TS05 model on regular grid 
     axis = np.arange(-10, 10, 0.50)

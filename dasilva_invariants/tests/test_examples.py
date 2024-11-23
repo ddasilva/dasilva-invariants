@@ -8,8 +8,8 @@ import requests
 def test_tsyganenko():
     # Get TS05 model input parameters
     time = datetime(2015, 10, 2)
-    params = {'Pdyn': 2.56, 'SymH': -25.0, 'By': 10.81, 'Bz': 0.64, 'W1': 0.524, 'W2': 0.352, 'W3': 0.376, 'W4': 0.342, 'W5': 0.159, 'W6': 0.479}
-    
+    params = models.get_tsyganenko_params(time)
+
     # Evaluate TS05 model on regular grid
     axis = np.arange(-10, 10, 0.5)
     x, y, z = np.meshgrid(axis, axis, axis)
@@ -28,7 +28,7 @@ def test_tsyganenko():
         starting_pitch_angle=60
     )
     
-    assert abs(result.LStar - 5.4) < .1
+    assert abs(result.LStar - 5.79) < .1
 
 
 def test_swmf():
